@@ -11,10 +11,10 @@ class Points(Sequence):
     Can be indexed to a get a tuple of the n'th point."""
     flattened_points = None
     name = "points"
-    metadata = {} # metadata per point "x,y", like: {"21,53": {"type": "lymphocyte"}, "3,4": {"type": "dendrophyl"}}
 
     def __init__(self, init_points: list = None):
         self.flattened_points = array.array('I')
+        self.metadata: Dict[str, Dict] = {}
         super().__init__()
 
         if init_points:
@@ -36,17 +36,14 @@ class Polygons(Sequence):
     """Somewhat space effecient method of storing the positive and negative vertices from a polygon.
     
     Internally uses EfficientArray to store the positive vertices of each polygon"""
-    polygons = None
-    simplified_polygons = []
-    negative_polygons_i = {}
-    labels = []
     name = "polygons"
-    metadata = {} # metadata per polygon index, like: {0: {"type": "lymphocyte"}, 3: {"type": "dendrophyl"}}
 
     def __init__(self):
         self.polygons = EfficientArray()
+        self.simplified_polygons = []
         self.negative_polygons_i = {}
         self.labels = []
+        self.metadata: Dict[int, Dict] = {}
         super().__init__()
 
     def __getitem__(self, i: int | slice):
@@ -142,7 +139,8 @@ class Heatmap():
                 target[i][j] = source[i][j]
 
     def __len__(self):
-        return len(self.matrix) * len(self.matrix[0]) # Number of bytes occupied
+        """Logical annotation count for Anno2 (`numItems`); not pixel/cell count."""
+        return 1
 
 class EfficientArray():
     """Efficient way to represent a array of arrays containing only unsigned integers"""

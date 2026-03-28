@@ -4,6 +4,7 @@ This test checks if a local annotation can be converted into an anno2, and if it
 import os
 import tempfile
 import shutil
+import zipfile
 from datetime import datetime
 import json
 
@@ -11,6 +12,8 @@ from common_lib import create_study
 
 import slidescore
 import slidescore.bin_data
+from slidescore.lib.AnnoClasses import Heatmap, Points, Polygons
+from slidescore.lib.Encoder import Encoder
 
 
 def gen_mask_tsv(size, x_offset=0, y_offset=0):
@@ -106,6 +109,59 @@ def create_anno2s():
         output_fns.append(option_anno2_path)
     
     return output_fns
+
+
+def test_heatmap_numitems_in_system_metadata():
+    data = [[10, 20, 30], [40, 50, 60], [70, 80, 90]]
+    hm = Heatmap(data, x_offset=5, y_offset=6, size_per_pixel=16)
+    assert len(hm) == 1
+    enc = Encoder(hm)
+    assert enc.system_metadata["numItems"] == 1
+    assert enc.dataItems["numItems"] == 1
+
+
+def test_heatmap_zip_system_metadata(tmp_path):
+    data = [[1, 2], [3, 4]]
+    hm = Heatmap(data, 0, 0, 8)
+    out = tmp_path / "hm.zip"
+    enc = Encoder(hm)
+    enc.generate_tile_data(256)
+    enc.populate_lookup_tables()
+    enc.dump_to_file(str(out))
+    with zipfile.ZipFile(out) as zf:
+        meta = json.loads(zf.read("system_metadata.json").decode())
+    assert meta["type"] == "heatmap"
+    assert meta["numItems"] == 1
+
+
+def test_points_metadata_is_not_shared():
+    a = Points([(0, 0)])
+    b = Points([(1, 1)])
+    a.metadata["k"] = {"x": 1}
+    assert a.metadata
+    assert "k" not in b.metadata
+
+
+def test_polygons_metadata_is_not_shared():
+    p1 = Polygons()
+    p1.addPolygon([0, 0, 1, 0, 1, 1])
+    p2 = Polygons()
+    p2.addPolygon([2, 2, 3, 2, 3, 3])
+    p1.metadata[0] = {"label": "a"}
+    assert 0 in p1.metadata
+    assert 0 not in p2.metadata
+
+
+def test_convert_to_anno2_accepts_heatmap_instance(tmp_path):
+    hm = Heatmap([[1, 2, 3], [4, 5, 6]], 10, 20, 4)
+    out = tmp_path / "from_client.zip"
+    client = slidescore.APIClient("https://example.invalid/", "token")
+    client.convert_to_anno2(hm, None, str(out))
+    with zipfile.ZipFile(out) as zf:
+        meta = json.loads(zf.read("system_metadata.json").decode())
+    assert meta["numItems"] == 1
+    assert meta["type"] == "heatmap"
+
 
 def test_anno2():
     # First test if we can create anno2s locally at all

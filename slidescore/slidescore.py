@@ -12,7 +12,7 @@ import unicodedata
 
 from .lib.utils import read_slidescore_json
 from .lib.Encoder import Encoder
-from .lib.AnnoClasses import Points, Polygons
+from .lib.AnnoClasses import Heatmap, Points, Polygons
 
 class SlideScoreErrorException(Exception):
     pass
@@ -586,14 +586,14 @@ class APIClient(object):
         
     def convert_to_anno2(self, items, metadata, output_path):
         """Converts a SlideScore Annotation Object to the new Anno2 zip based format
-        Only supports annotations of points or polygons/brush. Will error otherwise.
+        Supports points, polygons/brush, or a :class:`Heatmap` instance (same union as :class:`Encoder`).
 
         anno1_data: Dictionary containing the annotation like: [{"type": "brush", "positivePolygons": [] ...]
         metadata: Dictionary containing any metadata regarding the annotation, will be included as JSON in output
         output_path: string of the path on disk the anno2.zip will be written to
         """
-        # Allow pre-loaded Points and Polygons objects
-        if not isinstance(items, Points) and not isinstance(items, Polygons):
+        # Allow pre-loaded Points, Polygons, and Heatmap objects (match ``Encoder``)
+        if not isinstance(items, (Points, Polygons, Heatmap)):
             items = read_slidescore_json(items)
         
         encoder = Encoder(items, big_polygon_size_cutoff=100 * 100)
