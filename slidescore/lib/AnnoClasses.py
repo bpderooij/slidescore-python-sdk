@@ -57,7 +57,7 @@ class Polygons(Sequence):
             return [self[index] for index in range(start, stop, step)]
 
         points_flat = self.polygons.getValues(i)
-        postive_vertices = [(points_flat[i], points_flat[i + 1]) for i in range(0, len(points_flat), 2)]
+        postive_vertices = [(points_flat[j], points_flat[j + 1]) for j in range(0, len(points_flat), 2)]
         return {
             "positiveVertices": postive_vertices,
             "negativeVerticesArr": self.negative_polygons_i[i] if i in self.negative_polygons_i else None
@@ -150,9 +150,6 @@ class Heatmap():
 
 class EfficientArray():
     """Efficient way to represent a array of arrays containing only unsigned integers"""
-    valuesArray = None # array.array('I')
-    offsetArray = None # array.array('I')
-    curOffsetIndex = None # 0
 
     def __init__(self):
         self.offsetArray = array.array('I')

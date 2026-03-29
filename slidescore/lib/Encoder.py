@@ -5,7 +5,6 @@ import json
 import tarfile
 import zipfile
 import io
-from typing import List, Dict, Any
 
 import msgpack
 import brotli
@@ -19,12 +18,6 @@ _logger = logging.getLogger(__name__)
 
 class Encoder():
     """Encompassing class to encode AnnoClasses"""
-    items: Items = None
-
-    dataItems: Dict[str, Any] = None # Data regarding the raw mask / polygon / heatmap containers
-    dataLookup: List[Dict] = None # Data regarding lookup tables for mask and polygons
-    system_metadata = {} # Metadata that is controlled by this encoder, used in decoding
-    user_metadata = {} # Metadata that the user passes regarding this annotation, saved in the output zip
     big_polygon_size_cutoff = 100 * 100 # Size that is considered a "big" polygon, saved seperatly
     few_points_cutoff = 500 * 1000 # Determined using some tests
     low_density_cutoff = 30 # If there are fewer than 30 points per 256x256 PNG tile, save points as json
