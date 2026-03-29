@@ -91,7 +91,10 @@ class Heatmap():
     def __init__(self, data: list, x_offset: int, y_offset: int, size_per_pixel: int):
         # data is 2d matrix containing the pixels
         self.matrix = self.generate_2d_ubyte_array(len(data), len(data[0]))
-        self.copy_matrix_to_larger(data, self.matrix)
+        try:
+            self.copy_matrix_to_larger(data, self.matrix)
+        except (OverflowError, TypeError) as exc:
+            raise ValueError("Heatmap values must be integers in range 0-255") from exc
 
         self.x_offset = x_offset
         self.y_offset = y_offset
