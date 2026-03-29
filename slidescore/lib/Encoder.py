@@ -1,3 +1,4 @@
+import copy
 import math
 import array
 import json
@@ -50,10 +51,11 @@ class Encoder():
         if isinstance(items, Points):
             log("Loaded", self.dataItems["numItems"], "points in encoder, type:", type_string)
         elif isinstance(items, Polygons):
-            num_points = int(len(items.polygons.valuesArray) / 2)
+            self.items = copy.deepcopy(items)
+            num_points = int(len(self.items.polygons.valuesArray) / 2)
             log("Loaded", self.dataItems["numItems"], "polygons in encoder, with num points", num_points)
-            items.simplify()
-            num_points = int(len(items.polygons.valuesArray) / 2)
+            self.items.simplify()
+            num_points = int(len(self.items.polygons.valuesArray) / 2)
             log("Simplified to num points", num_points)
 
 
