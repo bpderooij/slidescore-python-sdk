@@ -144,6 +144,42 @@ class Heatmap():
             for j in range(len(source[0])):
                 target[i][j] = source[i][j]
 
+    @classmethod
+    def from_numpy(cls, arr: "numpy.ndarray", x_offset: int, y_offset: int, size_per_pixel: int) -> "Heatmap":
+        """Construct a Heatmap from a 2-D numpy array.
+
+        Parameters
+        ----------
+        arr : numpy.ndarray
+            2-D array with shape ``(rows, cols)``. Values must be in 0-255.
+            ``uint8`` arrays are accepted as-is; other integer/float dtypes are
+            validated for range then cast to ``uint8``.
+        x_offset : int
+        y_offset : int
+        size_per_pixel : int
+
+        Returns
+        -------
+        Heatmap
+        """
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise ImportError("numpy is required for Heatmap.from_numpy") from exc
+
+        if arr.ndim != 2:
+            raise ValueError(f"Expected a 2-D array, got shape {arr.shape}")
+
+        if arr.dtype != np.uint8:
+            arr_min, arr_max = int(arr.min()), int(arr.max())
+            if arr_min < 0 or arr_max > 255:
+                raise ValueError(
+                    f"Array values must be in range 0-255, got min={arr_min}, max={arr_max}"
+                )
+            arr = arr.astype(np.uint8)
+
+        return cls(arr.tolist(), x_offset, y_offset, size_per_pixel)
+
     def __len__(self):
         """Logical annotation count for Anno2 (`numItems`); not pixel/cell count."""
         return 1
