@@ -39,7 +39,7 @@ def read_tsv(path: str, points_type: str, support_experimental = False):
         items = read_tsv_polygons(path)
         
     if len(items) == 0:
-        sys.exit("No items loaded")
+        raise ValueError("No items loaded")
 
     return items
 
@@ -165,10 +165,8 @@ def extract_geojson(data):
             for polygon in geometry["coordinates"]:
                 yield (None, polygon[0], polygon[1:])
         elif geometry["type"] == "Point":
-            # If we got a GeoJSON with points, report them as a polygon of length 2
-            # Callee should handle this
-            for polygon in geometry["coordinates"]:
-                yield (metadata, [geometry["coordinates"]], [])
+            # coordinates is [x, y]; yield once as a single-point polygon
+            yield (metadata, [geometry["coordinates"]], [])
 
 def read_slidescore_json(data):
     """Parses JSON's that are created using the SlideScore Front-end.
