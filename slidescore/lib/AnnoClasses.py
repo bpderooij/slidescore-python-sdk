@@ -1,8 +1,11 @@
 from collections.abc import Sequence
 from typing import Dict, List, Union
 import array
+import logging
 
 from slidescore.lib.simplify import simplifyPolygons
+
+_logger = logging.getLogger(__name__)
 # import numpy as np
 
 class Points(Sequence):
@@ -11,10 +14,10 @@ class Points(Sequence):
     Can be indexed to a get a tuple of the n'th point."""
     flattened_points = None
     name = "points"
-    metadata = {} # metadata per point "x,y", like: {"21,53": {"type": "lymphocyte"}, "3,4": {"type": "dendrophyl"}}
 
     def __init__(self, init_points: list = None):
         self.flattened_points = array.array('I')
+        self.metadata: Dict[str, Dict] = {}
         super().__init__()
 
         if init_points:
@@ -36,17 +39,14 @@ class Polygons(Sequence):
     """Somewhat space effecient method of storing the positive and negative vertices from a polygon.
     
     Internally uses EfficientArray to store the positive vertices of each polygon"""
-    polygons = None
-    simplified_polygons = []
-    negative_polygons_i = {}
-    labels = []
     name = "polygons"
-    metadata = {} # metadata per polygon index, like: {0: {"type": "lymphocyte"}, 3: {"type": "dendrophyl"}}
 
     def __init__(self):
         self.polygons = EfficientArray()
+        self.simplified_polygons = []
         self.negative_polygons_i = {}
         self.labels = []
+        self.metadata: Dict[int, Dict] = {}
         super().__init__()
 
     def __getitem__(self, i: int | slice):
@@ -57,7 +57,7 @@ class Polygons(Sequence):
             return [self[index] for index in range(start, stop, step)]
 
         points_flat = self.polygons.getValues(i)
-        postive_vertices = [(points_flat[i], points_flat[i + 1]) for i in range(0, len(points_flat), 2)]
+        postive_vertices = [(points_flat[j], points_flat[j + 1]) for j in range(0, len(points_flat), 2)]
         return {
             "positiveVertices": postive_vertices,
             "negativeVerticesArr": self.negative_polygons_i[i] if i in self.negative_polygons_i else None
@@ -89,16 +89,20 @@ class Heatmap():
     x_offset: int
     y_offset: int
     size_per_pixel: int
-    name = "heatmap"
+    name: str
 
-    def __init__(self, data: list, x_offset: int, y_offset: int, size_per_pixel: int):
+    def __init__(self, data: list, x_offset: int, y_offset: int, size_per_pixel: int, name: str = "heatmap"):
         # data is 2d matrix containing the pixels
         self.matrix = self.generate_2d_ubyte_array(len(data), len(data[0]))
-        self.copy_matrix_to_larger(data, self.matrix)
+        try:
+            self.copy_matrix_to_larger(data, self.matrix)
+        except (OverflowError, TypeError) as exc:
+            raise ValueError("Heatmap values must be integers in range 0-255") from exc
 
         self.x_offset = x_offset
         self.y_offset = y_offset
         self.size_per_pixel = size_per_pixel
+        self.name = name
 
         super().__init__()
 
@@ -141,14 +145,48 @@ class Heatmap():
             for j in range(len(source[0])):
                 target[i][j] = source[i][j]
 
+    @classmethod
+    def from_numpy(cls, arr: "numpy.ndarray", x_offset: int, y_offset: int, size_per_pixel: int) -> "Heatmap":
+        """Construct a Heatmap from a 2-D numpy array.
+
+        Parameters
+        ----------
+        arr : numpy.ndarray
+            2-D array with shape ``(rows, cols)``. Values must be in 0-255.
+            ``uint8`` arrays are accepted as-is; other integer/float dtypes are
+            validated for range then cast to ``uint8``.
+        x_offset : int
+        y_offset : int
+        size_per_pixel : int
+
+        Returns
+        -------
+        Heatmap
+        """
+        try:
+            import numpy as np
+        except ImportError as exc:
+            raise ImportError("numpy is required for Heatmap.from_numpy") from exc
+
+        if arr.ndim != 2:
+            raise ValueError(f"Expected a 2-D array, got shape {arr.shape}")
+
+        if arr.dtype != np.uint8:
+            arr_min, arr_max = int(arr.min()), int(arr.max())
+            if arr_min < 0 or arr_max > 255:
+                raise ValueError(
+                    f"Array values must be in range 0-255, got min={arr_min}, max={arr_max}"
+                )
+            arr = arr.astype(np.uint8)
+
+        return cls(arr.tolist(), x_offset, y_offset, size_per_pixel)
+
     def __len__(self):
-        return len(self.matrix) * len(self.matrix[0]) # Number of bytes occupied
+        """Logical annotation count for Anno2 (`numItems`); not pixel/cell count."""
+        return 1
 
 class EfficientArray():
     """Efficient way to represent a array of arrays containing only unsigned integers"""
-    valuesArray = None # array.array('I')
-    offsetArray = None # array.array('I')
-    curOffsetIndex = None # 0
 
     def __init__(self):
         self.offsetArray = array.array('I')
@@ -169,7 +207,7 @@ class EfficientArray():
     def getValues(self, i: int):
         """Retrieve an entry from the values array"""
         if i >= self.curOffsetIndex:
-            print("Trying to get i", i, "but max is", self.curOffsetIndex)
+            _logger.error("Trying to get i %s but max is %s", i, self.curOffsetIndex)
             return None
         start = self.offsetArray[i]
         end = self.offsetArray[i + 1]

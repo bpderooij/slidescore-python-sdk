@@ -1,12 +1,10 @@
-# Std libs
-import sys
 import array
-import time
 import json
 import math
 import logging
 
-# Local libs
+_logger = logging.getLogger(__name__)
+
 from .AnnoClasses import EfficientArray, Points, Polygons, Heatmap
 from .PolygonContainer import PolygonContainer
 
@@ -39,7 +37,7 @@ def read_tsv(path: str, points_type: str, support_experimental = False):
         items = read_tsv_polygons(path)
         
     if len(items) == 0:
-        sys.exit("No items loaded")
+        raise ValueError("No items loaded")
 
     return items
 
@@ -134,8 +132,8 @@ def read_geo_json(path: str):
         return polygons
 
     # We got _both_ polygons and points
-    print("WARNING: Detected BOTH points and polygons in GeoJSON, only continueing with polygons", file=sys.stderr)
-    print("WARNING: Please remove the points from the GeoJSON to prevent ambiguity", file=sys.stderr)
+    _logger.warning("Detected BOTH points and polygons in GeoJSON, only continuing with polygons")
+    _logger.warning("Please remove the points from the GeoJSON to prevent ambiguity")
     return polygons
 
 def extract_geojson(data):
@@ -165,10 +163,8 @@ def extract_geojson(data):
             for polygon in geometry["coordinates"]:
                 yield (None, polygon[0], polygon[1:])
         elif geometry["type"] == "Point":
-            # If we got a GeoJSON with points, report them as a polygon of length 2
-            # Callee should handle this
-            for polygon in geometry["coordinates"]:
-                yield (metadata, [geometry["coordinates"]], [])
+            # coordinates is [x, y]; yield once as a single-point polygon
+            yield (metadata, [geometry["coordinates"]], [])
 
 def read_slidescore_json(data):
     """Parses JSON's that are created using the SlideScore Front-end.
@@ -400,12 +396,11 @@ def read_tsv_binary_heatmap(path: str):
 
 
         # Construct the heatmap
-        heatmap = Heatmap(data, x_offset, y_offset, size_per_pixel)
+        heatmap = Heatmap(data, x_offset, y_offset, size_per_pixel, name='binary-heatmap')
         for line in fh:
             line_parts = line.split()
             x, y = int(line_parts[0]), int(line_parts[1])
             heatmap.setPoint(x, y, 255)
-    heatmap.name = 'binary-heatmap'
     return heatmap
 
 # Export functions
@@ -465,40 +460,37 @@ def msgpack_encoder(obj):
 
 # miscellaneous
 
-time_on_load = time.time()
-def log(*args):
-    """Logs the arguments to the console, prefixing the time passed since script execution began"""
-    time_passed = time.time() - time_on_load
-    print("{:.2f}".format(time_passed), ' '.join(map(str, args)))
-
-
-NOTICE_LEVEL = 25  # between INFO (20) and WARNING (30)
-logging.addLevelName(NOTICE_LEVEL, "NOTICE")
-
-def notice(self, message, *args, **kwargs):
-    if self.isEnabledFor(NOTICE_LEVEL):
-        self._log(NOTICE_LEVEL, message, args, **kwargs)
-
-logging.Logger.notice = notice
+_NOTICE_LEVEL = 25  # between INFO (20) and WARNING (30)
 
 def get_logger(verbosity: int) -> logging.Logger:
-    """Configure and return a logger with the given verbosity level."""
-    # Map verbosity count to logging levels
+    """Configure and return a logger with the given verbosity level.
+
+    Registers a custom NOTICE level (25, between INFO and WARNING) on first
+    call. This is intentionally deferred so importing the library has no side
+    effects on the logging system.
+    """
+    if not hasattr(logging.Logger, "notice"):
+        logging.addLevelName(_NOTICE_LEVEL, "NOTICE")
+
+        def _notice(self, message, *args, **kwargs):
+            if self.isEnabledFor(_NOTICE_LEVEL):
+                self._log(_NOTICE_LEVEL, message, args, **kwargs)
+
+        logging.Logger.notice = _notice  # type: ignore[attr-defined]
+
     if verbosity == 0:
-        level = NOTICE_LEVEL
+        level = _NOTICE_LEVEL
     elif verbosity == 1:
         level = logging.INFO
     else:
         level = logging.DEBUG
 
-    # Configure root logger
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S"
+        datefmt="%H:%M:%S",
     )
 
     logger = logging.getLogger(__name__)
     logger.level = level
-
     return logger

@@ -23,6 +23,9 @@ setuptools.setup(
         'msgpack>=1.0.0',
         'pypng==0.20220715.0'
     ],
+    extras_require={
+        'numpy': ['numpy>=1.20'],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

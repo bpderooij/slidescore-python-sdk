@@ -1,4 +1,5 @@
 # coding=utf-8
+from collections.abc import Mapping
 import json
 import sys
 import requests
@@ -12,7 +13,7 @@ import unicodedata
 
 from .lib.utils import read_slidescore_json
 from .lib.Encoder import Encoder
-from .lib.AnnoClasses import Points, Polygons
+from .lib.AnnoClasses import Heatmap, Points, Polygons
 
 class SlideScoreErrorException(Exception):
     pass
@@ -50,13 +51,16 @@ class SlideScoreResult:
         self.question = dict['question']
         self.answer = dict['answer']
 
-        if self.answer is not None and self.answer[:2] == '[{':
-            annos = json.loads(self.answer)
-            if len(annos) > 0:
-                if hasattr(annos[0], 'type'):
-                    self.annotations = annos
-                else:
-                    self.points = annos
+        if self.answer is not None and len(self.answer) >= 2 and self.answer[:2] == '[{':
+            try:
+                annos = json.loads(self.answer)
+                if len(annos) > 0 and isinstance(annos[0], Mapping):
+                    if annos[0].get("type") is not None:
+                        self.annotations = annos
+                    else:
+                        self.points = annos
+            except json.JSONDecodeError:
+                pass
                     
     def toRow(self):
         """
@@ -349,7 +353,7 @@ class APIClient(object):
     def upload_ASAP(self, imageid, user, questions_map, annotation_name, asap_annotation):
         response = self.perform_request("UploadASAPAnnotations", {
                  "imageid": imageid,
-                 "questionsMap": '\n'.join(key+";"+value for key, val in questions_map.items()),
+                 "questionsMap": '\n'.join(f"{key};{val}" for key, val in questions_map.items()),
                  "user": user,
                  "annotationName": annotation_name,
                  "asapAnnotation": asap_annotation}
@@ -383,8 +387,6 @@ class APIClient(object):
         tuple
             Pair consisting of url, cookie.
         """
-        if self.base_url is None:
-            raise RuntimeError
         response = self.perform_request("GetTileServer?imageId="+str(imageid), None,  method="GET")
         rjson = response.json()
         return ( 
@@ -586,14 +588,14 @@ class APIClient(object):
         
     def convert_to_anno2(self, items, metadata, output_path):
         """Converts a SlideScore Annotation Object to the new Anno2 zip based format
-        Only supports annotations of points or polygons/brush. Will error otherwise.
+        Supports points, polygons/brush, or a :class:`Heatmap` instance (same union as :class:`Encoder`).
 
         anno1_data: Dictionary containing the annotation like: [{"type": "brush", "positivePolygons": [] ...]
         metadata: Dictionary containing any metadata regarding the annotation, will be included as JSON in output
         output_path: string of the path on disk the anno2.zip will be written to
         """
-        # Allow pre-loaded Points and Polygons objects
-        if not isinstance(items, Points) and not isinstance(items, Polygons):
+        # Allow pre-loaded Points, Polygons, and Heatmap objects (match ``Encoder``)
+        if not isinstance(items, (Points, Polygons, Heatmap)):
             items = read_slidescore_json(items)
         
         encoder = Encoder(items, big_polygon_size_cutoff=100 * 100)
@@ -604,7 +606,6 @@ class APIClient(object):
             encoder.add_metadata(metadata)
 
         encoder.dump_to_file(output_path)
-        print('Done converting to anno2')
 
 
     def convert_annotation_to_anno2(self, study_id, case_id, image_id, tma_core_id,

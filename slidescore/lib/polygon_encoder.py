@@ -141,14 +141,17 @@ def polygons_2_bytes(polygons: EfficientArray, tile_size = 256):
     return write_handle.getbuffer()
 
 if __name__ == "__main__":
-    print("Generating simple encoded polygons!")
+    import logging as _logging
+    _logging.basicConfig(level=_logging.DEBUG)
+    _log = _logging.getLogger(__name__)
+    _log.debug("Generating simple encoded polygons!")
     polygons = Polygons()
     polygon = [1, 1, 1, 2, 300, 300, 3, 3]
     polygons.addPolygon(polygon)
     polygon = [400, 400, 200, 200, 5, 5, 3, 3, 0, 0]
     polygons.addPolygon(polygon)
-    
+
     buf = polygons_2_bytes(polygons.polygons)
     with open('encoded_polygons.bin', 'wb') as fh:
         fh.write(buf)
-    print("Wrote encoded_polygons.bin")
+    _log.debug("Wrote encoded_polygons.bin")
