@@ -1,23 +1,24 @@
-from collections.abc import Sequence
-from typing import Dict, List, Union
 import array
 import logging
+from collections.abc import Sequence
 
 from slidescore.lib.simplify import simplifyPolygons
 
 _logger = logging.getLogger(__name__)
 # import numpy as np
 
+
 class Points(Sequence):
     """Class that allows to store many points space-effeciently. Used to store a mask
-    
+
     Can be indexed to a get a tuple of the n'th point."""
+
     flattened_points = None
     name = "points"
 
     def __init__(self, init_points: list = None):
-        self.flattened_points = array.array('I')
-        self.metadata: Dict[str, Dict] = {}
+        self.flattened_points = array.array("I")
+        self.metadata: dict[str, dict] = {}
         super().__init__()
 
         if init_points:
@@ -35,10 +36,12 @@ class Points(Sequence):
     def __len__(self):
         return int(len(self.flattened_points) / 2)
 
+
 class Polygons(Sequence):
     """Somewhat space effecient method of storing the positive and negative vertices from a polygon.
-    
+
     Internally uses EfficientArray to store the positive vertices of each polygon"""
+
     name = "polygons"
 
     def __init__(self):
@@ -46,7 +49,7 @@ class Polygons(Sequence):
         self.simplified_polygons = []
         self.negative_polygons_i = {}
         self.labels = []
-        self.metadata: Dict[int, Dict] = {}
+        self.metadata: dict[int, dict] = {}
         super().__init__()
 
     def __getitem__(self, i: int | slice):
@@ -57,10 +60,14 @@ class Polygons(Sequence):
             return [self[index] for index in range(start, stop, step)]
 
         points_flat = self.polygons.getValues(i)
-        postive_vertices = [(points_flat[j], points_flat[j + 1]) for j in range(0, len(points_flat), 2)]
+        postive_vertices = [
+            (points_flat[j], points_flat[j + 1]) for j in range(0, len(points_flat), 2)
+        ]
         return {
             "positiveVertices": postive_vertices,
-            "negativeVerticesArr": self.negative_polygons_i[i] if i in self.negative_polygons_i else None
+            "negativeVerticesArr": (
+                self.negative_polygons_i[i] if i in self.negative_polygons_i else None
+            ),
         }
 
     def addPolygon(self, postive_vertices):
@@ -81,17 +88,26 @@ class Polygons(Sequence):
         self.simplified_polygons = simplifyPolygons(self.polygons, 16)
 
     def __len__(self):
-        return len(self.polygons) # Number of polygons present, pos & neg
+        return len(self.polygons)  # Number of polygons present, pos & neg
 
-class Heatmap():
+
+class Heatmap:
     """Stores an x/y/value map of a heatmap"""
+
     matrix: list
     x_offset: int
     y_offset: int
     size_per_pixel: int
     name: str
 
-    def __init__(self, data: list, x_offset: int, y_offset: int, size_per_pixel: int, name: str = "heatmap"):
+    def __init__(
+        self,
+        data: list,
+        x_offset: int,
+        y_offset: int,
+        size_per_pixel: int,
+        name: str = "heatmap",
+    ):
         # data is 2d matrix containing the pixels
         self.matrix = self.generate_2d_ubyte_array(len(data), len(data[0]))
         try:
@@ -113,7 +129,7 @@ class Heatmap():
         # Matrix is indexed with [y][x]!
         max_y = max(current_size[0], y + 1)
         max_x = max(current_size[1], x + 1)
-        
+
         if max_y > current_size[0] or max_x > current_size[1]:
             new_matrix = self.generate_2d_ubyte_array(max_y, max_x)
             self.copy_matrix_to_larger(self.matrix, new_matrix)
@@ -124,9 +140,9 @@ class Heatmap():
 
     def get_metadata(self):
         metadata = {}
-        metadata['x'] = self.x_offset
-        metadata['y'] = self.y_offset
-        metadata['sizePerPixel'] = self.size_per_pixel
+        metadata["x"] = self.x_offset
+        metadata["y"] = self.y_offset
+        metadata["sizePerPixel"] = self.size_per_pixel
         return metadata
 
     def generate_2d_ubyte_array(self, num_rows, num_cols):
@@ -134,11 +150,11 @@ class Heatmap():
         Returns:
         - A 2D list of `array.array` of type 'B' (unsigned byte).
         """
-        return [array.array('B', [0] * num_cols) for _ in range(num_rows)]
+        return [array.array("B", [0] * num_cols) for _ in range(num_rows)]
 
     def copy_matrix_to_larger(self, source, target):
         """Copies a smaller matrix into a larger one.
-    
+
         The function assumes that the target matrix is large enough to contain the source matrix.
         """
         for i in range(len(source)):
@@ -146,7 +162,9 @@ class Heatmap():
                 target[i][j] = source[i][j]
 
     @classmethod
-    def from_numpy(cls, arr: "numpy.ndarray", x_offset: int, y_offset: int, size_per_pixel: int) -> "Heatmap":
+    def from_numpy(
+        cls, arr: "numpy.ndarray", x_offset: int, y_offset: int, size_per_pixel: int
+    ) -> "Heatmap":
         """Construct a Heatmap from a 2-D numpy array.
 
         Parameters
@@ -185,12 +203,13 @@ class Heatmap():
         """Logical annotation count for Anno2 (`numItems`); not pixel/cell count."""
         return 1
 
-class EfficientArray():
+
+class EfficientArray:
     """Efficient way to represent a array of arrays containing only unsigned integers"""
 
     def __init__(self):
-        self.offsetArray = array.array('I')
-        self.valuesArray = array.array('I')
+        self.offsetArray = array.array("I")
+        self.valuesArray = array.array("I")
         self.curOffsetIndex = 0
 
         self.offsetArray.append(0)
@@ -211,16 +230,16 @@ class EfficientArray():
             return None
         start = self.offsetArray[i]
         end = self.offsetArray[i + 1]
-        return self.valuesArray[start : end]
+        return self.valuesArray[start:end]
 
     def __len__(self):
         return self.curOffsetIndex
 
+
 # Types
-Items = Union[Points, Polygons, Heatmap]
+Items = Points | Polygons | Heatmap
 
 # Single item
-Point = List[int] # Of len == 2
-Polygon = Dict[str, Points] # With str == "positiveVertices" | "negativeVertices"
-Item = Union[Point, Polygon]
-
+Point = list[int]  # Of len == 2
+Polygon = dict[str, Points]  # With str == "positiveVertices" | "negativeVertices"
+Item = Point | Polygon

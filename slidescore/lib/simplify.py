@@ -26,6 +26,7 @@ def getSquareSegmentDistance(p, p1, p2):
 
     return dx * dx + dy * dy
 
+
 def simplifyDouglasPeucker(points: array.array, tolerance: float):
     length = int(len(points) // 2)
     markers = []
@@ -36,7 +37,7 @@ def simplifyDouglasPeucker(points: array.array, tolerance: float):
     first_stack = []
     last_stack = []
 
-    new_points = array.array('I')
+    new_points = array.array("I")
 
     markers = [first, last]
 
@@ -44,9 +45,9 @@ def simplifyDouglasPeucker(points: array.array, tolerance: float):
         max_sqdist = 0
 
         for i in range(first, last):
-            point_i = points[i * 2: i * 2 + 2]
-            point_first = points[first * 2: first * 2 + 2]
-            point_last =points[last * 2: last * 2 + 2]
+            point_i = points[i * 2 : i * 2 + 2]
+            point_first = points[first * 2 : first * 2 + 2]
+            point_last = points[last * 2 : last * 2 + 2]
             sqdist = getSquareSegmentDistance(point_i, point_first, point_last)
 
             if sqdist > max_sqdist:
@@ -76,10 +77,14 @@ def simplifyDouglasPeucker(points: array.array, tolerance: float):
 
     markers.sort()
     for i in markers:
-        new_points.extend(points[i * 2: i * 2 + 2])
-    
+        new_points.extend(points[i * 2 : i * 2 + 2])
+
     # [x1, y1, x1, y1] -> [x1, y1]
-    if len(new_points) == 4 and new_points[0] == new_points[2] and new_points[1] == new_points[3]:
+    if (
+        len(new_points) == 4
+        and new_points[0] == new_points[2]
+        and new_points[1] == new_points[3]
+    ):
         new_points.pop()
         new_points.pop()
     return new_points
@@ -92,12 +97,15 @@ def simplify(points: array.array, tolerance=1.0):
 
     return points
 
-def gen_chunks(flat_list: list, chunk_size: int):   
+
+def gen_chunks(flat_list: list, chunk_size: int):
     for i in range(0, len(flat_list), chunk_size):
-        yield flat_list[i:i + chunk_size]
+        yield flat_list[i : i + chunk_size]
+
 
 def simplifyPolygons(polygons_arr, tolerance=1.0):
     from .AnnoClasses import EfficientArray
+
     simp_polygons_arr = EfficientArray()
     for polygon_i in range(len(polygons_arr)):
         # List of [x1, y1, x2, y2, etc...]
@@ -107,11 +115,14 @@ def simplifyPolygons(polygons_arr, tolerance=1.0):
     assert len(polygons_arr) == len(simp_polygons_arr)
     return simp_polygons_arr
 
+
 if __name__ == "__main__":
     import logging as _logging
+
     _logging.basicConfig(level=_logging.DEBUG)
     _log = _logging.getLogger(__name__)
     from .AnnoClasses import Polygons
+
     _log.debug("Testing simplify algorithm")
     almost_triangle = [0, 0, 100, 100, 105, 95, 200, 0]
     polygons = Polygons()

@@ -1,25 +1,25 @@
-# coding=utf-8
-from collections.abc import Mapping
-import json
-import sys
-import requests
-import base64
-import string
-import re
-import os
 import datetime
-from tusclient import client
+import json
+import os
+import re
 import unicodedata
+from collections.abc import Mapping
 
-from .lib.utils import read_slidescore_json
-from .lib.Encoder import Encoder
+import requests
+from tusclient import client
+
 from .lib.AnnoClasses import Heatmap, Points, Polygons
+from .lib.Encoder import Encoder
+from .lib.utils import read_slidescore_json
+
 
 class SlideScoreErrorException(Exception):
     pass
 
+
 class SlideScoreResult:
     """Slidescore wrapper class for storing SlideScore server responses."""
+
     def __init__(self, dict=None):
         """
         Parameters
@@ -30,8 +30,8 @@ class SlideScoreResult:
         if dict is None:
             self.id = 0
             self.image_id = 0
-            self.image_name = ''
-            self.case_name = ''
+            self.image_name = ""
+            self.case_name = ""
             self.user = None
             self.tma_row = None
             self.tma_col = None
@@ -40,18 +40,22 @@ class SlideScoreResult:
             self.answer = None
             return
 
-        self.id = int(dict['id'])
-        self.image_id = int(dict['imageID']) if dict['imageID'] != None else 0
-        self.image_name = dict['imageName']
-        self.case_name = dict['caseName'] if 'caseName' in dict else None
-        self.user = dict['user']
-        self.tma_row = int(dict['tmaRow']) if 'tmaRow' in dict else None
-        self.tma_col = int(dict['tmaCol']) if 'tmaCol' in dict else None
-        self.tma_sample_id = dict['tmaSampleID'] if 'tmaSampleID' in dict else None
-        self.question = dict['question']
-        self.answer = dict['answer']
+        self.id = int(dict["id"])
+        self.image_id = int(dict["imageID"]) if dict["imageID"] is not None else 0
+        self.image_name = dict["imageName"]
+        self.case_name = dict["caseName"] if "caseName" in dict else None
+        self.user = dict["user"]
+        self.tma_row = int(dict["tmaRow"]) if "tmaRow" in dict else None
+        self.tma_col = int(dict["tmaCol"]) if "tmaCol" in dict else None
+        self.tma_sample_id = dict["tmaSampleID"] if "tmaSampleID" in dict else None
+        self.question = dict["question"]
+        self.answer = dict["answer"]
 
-        if self.answer is not None and len(self.answer) >= 2 and self.answer[:2] == '[{':
+        if (
+            self.answer is not None
+            and len(self.answer) >= 2
+            and self.answer[:2] == "[{"
+        ):
             try:
                 annos = json.loads(self.answer)
                 if len(annos) > 0 and isinstance(annos[0], Mapping):
@@ -61,7 +65,7 @@ class SlideScoreResult:
                         self.points = annos
             except json.JSONDecodeError:
                 pass
-                    
+
     def toRow(self):
         """
         Options:
@@ -71,27 +75,26 @@ class SlideScoreResult:
             4. CaseName	ImageID	Name	By	TMA Row	TMA Col	TMA Sample	Question	Answer = 9
             5. CaseName	By	Question	Answer = 4
         """
-        answer_str = ''
-        
+        answer_str = ""
+
         # Prepend case name if needed
         if self.case_name is not None:
-            answer_str += f'{self.case_name}	'
-        
+            answer_str += f"{self.case_name}	"
+
         # Early return option 5
         if self.image_id is None:
-            answer_str += f'{self.case_name}	{self.user}	{self.question}	{self.answer}'
+            answer_str += f"{self.case_name}	{self.user}	{self.question}	{self.answer}"
             return answer_str
-        
+
         # Add image_id, name and user
-        answer_str += f'{self.image_id}	{self.image_name}	{self.user}	'
+        answer_str += f"{self.image_id}	{self.image_name}	{self.user}	"
         # If TMA is defined, add it
         if self.tma_row is not None:
-            answer_str += f'{self.tma_row}	{self.tma_col}	{self.tma_sample_id}	'
+            answer_str += f"{self.tma_row}	{self.tma_col}	{self.tma_sample_id}	"
         # Finally add the question and answer
-        answer_str += f'{self.question}	{self.answer}'
+        answer_str += f"{self.question}	{self.answer}"
         return answer_str
 
-        
     def __repr__(self):
         return (
             f"SlideScoreResult(case_name={self.case_name}, "
@@ -103,30 +106,36 @@ class SlideScoreResult:
             f"tma_sample_id={self.tma_sample_id}, "
             f"question={self.question}, "
             f"answer=length {len(self.answer)})"
-        )     
+        )
+
 
 class SlideScoreSession:
     """Wrapper class for storing SlideScore tracking sessions"""
+
     def __init__(self, dict=None):
         if dict is None:
             self.id = 0
             self.image_id = 0
-            self.email = ''
-            self.length = ''
+            self.email = ""
+            self.length = ""
             self.study_id = None
             self.created_on = None
             return
 
-        self.id = int(dict['id'])
-        self.image_id = int(dict['imageID'])
-        self.email = dict['email']
-        self.length = int(dict['length'])
-        self.study_id = int(dict['studyID'])
-        #ignore milliseconds, sometimes there are 7 digits
-        self.created_on = datetime.datetime.strptime(dict["createdOn"][:19],"%Y-%m-%dT%H:%M:%S")
-        
+        self.id = int(dict["id"])
+        self.image_id = int(dict["imageID"])
+        self.email = dict["email"]
+        self.length = int(dict["length"])
+        self.study_id = int(dict["studyID"])
+        # ignore milliseconds, sometimes there are 7 digits
+        self.created_on = datetime.datetime.strptime(
+            dict["createdOn"][:19], "%Y-%m-%dT%H:%M:%S"
+        )
+
+
 class SlideScoreSessionEvent:
     """Wrapper class for storing SlideScore tracking session events"""
+
     def __init__(self, s=None):
         if s is None:
             self.timestamp = 0
@@ -137,7 +146,7 @@ class SlideScoreSessionEvent:
             self.cursor_x = 0
             self.cursor_y = 0
             return
-        terms=s.split('\t')
+        terms = s.split("\t")
         self.timestamp = int(terms[0])
         self.x = int(terms[1])
         self.y = int(terms[2])
@@ -146,9 +155,8 @@ class SlideScoreSessionEvent:
         self.cursor_x = int(terms[5])
         self.cursor_y = int(terms[6])
 
-        
 
-class APIClient(object):
+class APIClient:
     print_debug = False
 
     def __init__(self, server, api_token, disable_cert_checking=False):
@@ -163,10 +171,10 @@ class APIClient(object):
             API token for this API request.
         disable_cert_checking : bool
             Disable checking of SSL certification (not recommended).
-        """    
-        if (server[-1] == "/"):
+        """
+        if server[-1] == "/":
             server = server[:-1]
-        self.end_point = "{0}/Api/".format(server)
+        self.end_point = f"{server}/Api/"
         self.api_token = api_token
         self.disable_cert_checking = disable_cert_checking
 
@@ -186,19 +194,23 @@ class APIClient(object):
         Response
         """
         if method not in ["POST", "GET"]:
-            raise SlideScoreErrorException(f"Expected method to be either `POST` or `GET`. Got {method}.")
-        
-        headers = {'Accept': 'application/json'}
-        headers['Authorization'] = 'Bearer {auth}'.format(auth=self.api_token)
-        url = "{0}{1}".format(self.end_point, request)
-        verify=True
+            raise SlideScoreErrorException(
+                f"Expected method to be either `POST` or `GET`. Got {method}."
+            )
+
+        headers = {"Accept": "application/json"}
+        headers["Authorization"] = f"Bearer {self.api_token}"
+        url = f"{self.end_point}{request}"
+        verify = True
         if self.disable_cert_checking:
-            verify=False
-        
+            verify = False
+
         if method == "POST":
             response = requests.post(url, verify=verify, headers=headers, data=data)
         else:
-            response = requests.get(url, verify=verify, headers=headers, data=data, stream=stream)
+            response = requests.get(
+                url, verify=verify, headers=headers, data=data, stream=stream
+            )
         if response.status_code != 200:
             response.raise_for_status()
 
@@ -214,13 +226,13 @@ class APIClient(object):
         -------
         dict
             Dictionary containing the images in the study.
-        For example to download all slides in a study with id 1 into the current directory you need to do 
+        For example to download all slides in a study with id 1 into the current directory you need to do
             client = APIClient(url, token)
             for f in client.get_images(1):
                 client.download_slide(1, f["id"], ".")
 
-        
-        """    
+
+        """
         response = self.perform_request("Images", {"studyid": studyid})
         rjson = response.json()
         return rjson
@@ -240,8 +252,8 @@ class APIClient(object):
             for c in client.get_cases(1):
                 print(str(c["id"])+" - " + c["name"])
 
-        
-        """    
+
+        """
         response = self.perform_request("Cases", {"studyid": studyid})
         rjson = response.json()
         return rjson
@@ -251,18 +263,20 @@ class APIClient(object):
         Get list of studies this token can access
         Parameters
         ----------
-        None 
-        
+        None
+
         Returns
         -------
         dict
             Dictionary containing the studies.
-        """    
+        """
         response = self.perform_request("Studies", {})
         rjson = response.json()
         return rjson
-        
-    def get_results(self, studyid, question=None, email=None, imageid=None, caseid=None):
+
+    def get_results(
+        self, studyid, question=None, email=None, imageid=None, caseid=None
+    ):
         """
         Basic functionality to download all answers for a particular study.
         Returns a SlideScoreResult class wrapper containing the information.
@@ -283,10 +297,19 @@ class APIClient(object):
         List[SlideScoreResult]
             List of SlideScore results.
         """
-        response = self.perform_request("Scores", {"studyid": studyid, "question": question, "email": email, "imageid": imageid, "caseid": caseid})
+        response = self.perform_request(
+            "Scores",
+            {
+                "studyid": studyid,
+                "question": question,
+                "email": email,
+                "imageid": imageid,
+                "caseid": caseid,
+            },
+        )
         rjson = response.json()
         return [SlideScoreResult(r) for r in rjson]
-        
+
     def get_config(self, study_id):
         """
         Get the configuration of a particular study. Returns a dictionary.
@@ -302,9 +325,11 @@ class APIClient(object):
         rjson = response.json()
 
         if not rjson["success"]:
-            raise SlideScoreErrorException(f"Configuration for study id {study_id} not returned succesfully")
+            raise SlideScoreErrorException(
+                f"Configuration for study id {study_id} not returned succesfully"
+            )
 
-        return rjson["config"]        
+        return rjson["config"]
 
     def get_config_files(self, study_id):
         """
@@ -321,17 +346,19 @@ class APIClient(object):
         rjson = response.json()
 
         if not rjson["success"]:
-            raise SlideScoreErrorException(f"Configuration for study id {study_id} not returned succesfully")
+            raise SlideScoreErrorException(
+                f"Configuration for study id {study_id} not returned succesfully"
+            )
 
-        return rjson        
-        
+        return rjson
+
     def upload_results(self, studyid, results):
         """
         Basic functionality to upload results/answers made for a particular study.
         Returns true if successful.
         results should be a list of strings, where each elemement is a line of text of the following format:
         imageID - tab - imageNumber - tab - author - tab - question - tab - answer
-        
+
         Parameters
         ----------
         studyid : int
@@ -339,41 +366,48 @@ class APIClient(object):
         Returns
         -------
         bool
-        """    
-        sres = "\n"+"\n".join([r.toRow() for r in results])
-        response = self.perform_request("UploadResults", {
-                 "studyid": studyid,
-                 "results": sres
-                 }, method="POST")
+        """
+        sres = "\n" + "\n".join([r.toRow() for r in results])
+        response = self.perform_request(
+            "UploadResults", {"studyid": studyid, "results": sres}, method="POST"
+        )
         rjson = response.json()
-        if (not rjson['success']):
-            raise SlideScoreErrorException(rjson['log'])
+        if not rjson["success"]:
+            raise SlideScoreErrorException(rjson["log"])
         return True
-        
-    def upload_ASAP(self, imageid, user, questions_map, annotation_name, asap_annotation):
-        response = self.perform_request("UploadASAPAnnotations", {
-                 "imageid": imageid,
-                 "questionsMap": '\n'.join(f"{key};{val}" for key, val in questions_map.items()),
-                 "user": user,
-                 "annotationName": annotation_name,
-                 "asapAnnotation": asap_annotation}
-                 , method="POST")
+
+    def upload_ASAP(
+        self, imageid, user, questions_map, annotation_name, asap_annotation
+    ):
+        response = self.perform_request(
+            "UploadASAPAnnotations",
+            {
+                "imageid": imageid,
+                "questionsMap": "\n".join(
+                    f"{key};{val}" for key, val in questions_map.items()
+                ),
+                "user": user,
+                "annotationName": annotation_name,
+                "asapAnnotation": asap_annotation,
+            },
+            method="POST",
+        )
         rjson = response.json()
-        if (not rjson['success']):
-            raise SlideScoreErrorException(rjson['log'])
+        if not rjson["success"]:
+            raise SlideScoreErrorException(rjson["log"])
         return True
 
     def export_ASAP(self, imageid, user, question):
-        response = self.perform_request("ExportASAPAnnotations", {
-                 "imageid": imageid,
-                 "user": user,
-                 "question": question})
+        response = self.perform_request(
+            "ExportASAPAnnotations",
+            {"imageid": imageid, "user": user, "question": question},
+        )
         rawresp = response.text
-        if rawresp[0] == '<':
+        if rawresp[0] == "<":
             return rawresp
         rjson = response.json()
-        if (not rjson['success']):
-            raise SlideScoreErrorException(rjson['log'])
+        if not rjson["success"]:
+            raise SlideScoreErrorException(rjson["log"])
 
     def get_image_server_url(self, imageid):
         """
@@ -387,49 +421,77 @@ class APIClient(object):
         tuple
             Pair consisting of url, cookie.
         """
-        response = self.perform_request("GetTileServer?imageId="+str(imageid), None,  method="GET")
+        response = self.perform_request(
+            "GetTileServer?imageId=" + str(imageid), None, method="GET"
+        )
         rjson = response.json()
-        return ( 
-            self.end_point.replace("/Api/","/i/"+str(imageid)+"/"+rjson['urlPart']+"/_files"), 
-            rjson['cookiePart'] 
+        return (
+            self.end_point.replace(
+                "/Api/", "/i/" + str(imageid) + "/" + rjson["urlPart"] + "/_files"
+            ),
+            rjson["cookiePart"],
         )
 
-
     def _get_filename(self, s):
-      fname = re.findall("filename*?=([^;]+)", s, flags=re.IGNORECASE)
-      fname=fname[0].strip().strip('"') 
-      
-      # Normalize unicode characters (e.g., 'ñ' becomes 'n')
-      fname = unicodedata.normalize('NFKD', fname).encode('ascii', 'ignore').decode('ascii')
+        fname = re.findall("filename*?=([^;]+)", s, flags=re.IGNORECASE)
+        fname = fname[0].strip().strip('"')
 
-      fname = re.sub(r'[^\w\s.\-,;=]', '_', fname).strip()
-      return fname
-        
+        # Normalize unicode characters (e.g., 'ñ' becomes 'n')
+        fname = (
+            unicodedata.normalize("NFKD", fname)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
+
+        fname = re.sub(r"[^\w\s.\-,;=]", "_", fname).strip()
+        return fname
+
     def download_slide(self, studyid, imageid, filepath):
-        response = self.perform_request("DownloadSlide", {"studyid": studyid, "imageid": imageid}, method="GET")
+        response = self.perform_request(
+            "DownloadSlide", {"studyid": studyid, "imageid": imageid}, method="GET"
+        )
         fname = self._get_filename(response.headers["Content-Disposition"])
-        with open(filepath+'/'+fname, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192): 
+        with open(filepath + "/" + fname, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
 
     def get_screenshot_whole(self, imageid, user, question, output_file):
-        response = self.perform_request("GetScreenshot", {"imageid": imageid, "withAnnotationForUser": user, "question": question, "level": 11}, method="GET")
-        with open(output_file, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192): 
+        response = self.perform_request(
+            "GetScreenshot",
+            {
+                "imageid": imageid,
+                "withAnnotationForUser": user,
+                "question": question,
+                "level": 11,
+            },
+            method="GET",
+        )
+        with open(output_file, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
 
     def request_upload(self, destination_folder, destination_filename, studyid):
-        response = self.perform_request("RequestUpload", {"filename": destination_filename, "folder": destination_folder, "studyId": studyid}, method="POST")
+        response = self.perform_request(
+            "RequestUpload",
+            {
+                "filename": destination_filename,
+                "folder": destination_folder,
+                "studyId": studyid,
+            },
+            method="POST",
+        )
         if response.text[0] == '"':
-            raise SlideScoreErrorException("Failed requesting upload: " + response.text);
-        return response.json()['token']
+            raise SlideScoreErrorException("Failed requesting upload: " + response.text)
+        return response.json()["token"]
 
     def finish_upload(self, upload_token, upload_url):
-        fileid=upload_url[upload_url.rindex('/')+1::]
-        response = self.perform_request("FinishUpload", {"id": fileid, "token": upload_token}, method="POST")
+        fileid = upload_url[upload_url.rindex("/") + 1 : :]
+        response = self.perform_request(
+            "FinishUpload", {"id": fileid, "token": upload_token}, method="POST"
+        )
         if response.text != '"OK"':
-            raise SlideScoreErrorException("Failed finishing upload: " + response.text);
-         
+            raise SlideScoreErrorException("Failed finishing upload: " + response.text)
+
     def upload_file(self, source_filename, destination_path, destination_filename=None):
         """
         Upload a file to the server.
@@ -439,133 +501,200 @@ class APIClient(object):
             Local path to the file to upload
         destination_path: string
             path (without filename) on the server
-        destination_filename: string 
+        destination_filename: string
             filename to use on the server, None to use the source filename
-        
+
         """
-        if destination_filename==None:
+        if destination_filename is None:
             destination_filename = os.path.basename(source_filename)
         uploadToken = self.request_upload(destination_path, destination_filename, None)
         self.upload_using_token(source_filename, uploadToken)
 
     def upload_using_token(self, source_filename, upload_token):
-        uploader_endpoint = self.end_point.replace('/Api/','/files/')
+        uploader_endpoint = self.end_point.replace("/Api/", "/files/")
         uploadClient = client.TusClient(uploader_endpoint)
-        uploader = uploadClient.uploader(source_filename, chunk_size=10*1000*1000, metadata={'uploadtoken': upload_token, 'apitoken': self.api_token})
+        uploader = uploadClient.uploader(
+            source_filename,
+            chunk_size=10 * 1000 * 1000,
+            metadata={"uploadtoken": upload_token, "apitoken": self.api_token},
+        )
         # Uploads the entire file.
         # This uploads chunk by chunk.
         uploader.upload()
         self.finish_upload(upload_token, uploader.url)
 
     def add_slide(self, study_id, destination_filename):
-        
-        response = self.perform_request("AddSlide", {"studyId": study_id, "path": destination_filename}, method="POST")
-        rjson=response.json()
+
+        response = self.perform_request(
+            "AddSlide",
+            {"studyId": study_id, "path": destination_filename},
+            method="POST",
+        )
+        rjson = response.json()
         if response.text[0] == '"':
-            raise SlideScoreErrorException("Failed adding slide: " + rjson);
+            raise SlideScoreErrorException("Failed adding slide: " + rjson)
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed adding slide: " + response.text);
-        return { "id": rjson['id'], "isOOF": rjson["isOOF"]}
+            raise SlideScoreErrorException("Failed adding slide: " + response.text)
+        return {"id": rjson["id"], "isOOF": rjson["isOOF"]}
 
     def reimport(self, study_name):
-        response = self.perform_request("Reimport", {"studyName": study_name}, method="POST")
+        response = self.perform_request(
+            "Reimport", {"studyName": study_name}, method="POST"
+        )
         if response.text[0] == '"':
-            raise SlideScoreErrorException("Failed reimporting: " + response.text);
-        rjson=response.json()
+            raise SlideScoreErrorException("Failed reimporting: " + response.text)
+        rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed reimporting: " + rjson["log"]);
-        return { "id": rjson['id'], "log": rjson["log"]}
-        
+            raise SlideScoreErrorException("Failed reimporting: " + rjson["log"])
+        return {"id": rjson["id"], "log": rjson["log"]}
+
     def get_slide_path(self, image_id):
-        response = self.perform_request("GetSlidePath", {"imageId": image_id}, method="GET")
+        response = self.perform_request(
+            "GetSlidePath", {"imageId": image_id}, method="GET"
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed getting slide path: " + response.text);
-        return rjson['path'] 
-        
+            raise SlideScoreErrorException(
+                "Failed getting slide path: " + response.text
+            )
+        return rjson["path"]
+
     def get_slide_description(self, image_id):
-        response = self.perform_request("GetSlideDescription", {"imageId": image_id}, method="GET")
+        response = self.perform_request(
+            "GetSlideDescription", {"imageId": image_id}, method="GET"
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed getting slide description: " + response.text);
-        return rjson['description'] 
-        
+            raise SlideScoreErrorException(
+                "Failed getting slide description: " + response.text
+            )
+        return rjson["description"]
+
     def get_case_description(self, case_id):
-        response = self.perform_request("GetCaseDescription", {"caseId": case_id}, method="GET")
+        response = self.perform_request(
+            "GetCaseDescription", {"caseId": case_id}, method="GET"
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed getting case description: " + response.text);
-        return rjson['description'] 
-        
+            raise SlideScoreErrorException(
+                "Failed getting case description: " + response.text
+            )
+        return rjson["description"]
 
     def update_slide_path(self, image_id, new_path):
-        response = self.perform_request("UpdateSlidePath", {"imageId": image_id, "newPath": new_path}, method="POST")
+        response = self.perform_request(
+            "UpdateSlidePath", {"imageId": image_id, "newPath": new_path}, method="POST"
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed updating slide path: " + response.text);
+            raise SlideScoreErrorException(
+                "Failed updating slide path: " + response.text
+            )
 
     def update_slide_description(self, study_id, image_id, new_description):
-        response = self.perform_request("SetSlideDescription", {"imageId": image_id, "studyId": study_id, "description": new_description}, method="POST")
-        rjson = response.json()
-        if response.text != '{}':
-            raise SlideScoreErrorException("Failed updating slide description: " + response.text);
-    
+        response = self.perform_request(
+            "SetSlideDescription",
+            {"imageId": image_id, "studyId": study_id, "description": new_description},
+            method="POST",
+        )
+        response.json()
+        if response.text != "{}":
+            raise SlideScoreErrorException(
+                "Failed updating slide description: " + response.text
+            )
+
     def update_slide_name(self, image_id, new_name):
-        response = self.perform_request("UpdateSlideName", {"imageId": image_id, "newName": new_name}, method="POST")
+        response = self.perform_request(
+            "UpdateSlideName", {"imageId": image_id, "newName": new_name}, method="POST"
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed updating slide name: " + response.text);
+            raise SlideScoreErrorException(
+                "Failed updating slide name: " + response.text
+            )
 
     def add_question(self, study_id, question_spec):
-        response = self.perform_request("AddQuestion", {"studyId": study_id, "questionSpec": question_spec}, method="POST")
+        response = self.perform_request(
+            "AddQuestion",
+            {"studyId": study_id, "questionSpec": question_spec},
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed adding question: " + response.text);
+            raise SlideScoreErrorException("Failed adding question: " + response.text)
         return rjson["id"]
 
     def update_question(self, study_id, score_id, order, question_spec):
-        response = self.perform_request("UpdateQuestion", {"studyId": study_id, "scoreId": score_id, "order": order, "questionSpec": question_spec}, method="POST")
+        response = self.perform_request(
+            "UpdateQuestion",
+            {
+                "studyId": study_id,
+                "scoreId": score_id,
+                "order": order,
+                "questionSpec": question_spec,
+            },
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed updating question: " + response.text);
+            raise SlideScoreErrorException("Failed updating question: " + response.text)
         return rjson["id"]
 
     def remove_question(self, study_id, score_id):
-        response = self.perform_request("RemoveQuestion", {"studyId": study_id, "scoreId": score_id}, method="POST")
+        response = self.perform_request(
+            "RemoveQuestion", {"studyId": study_id, "scoreId": score_id}, method="POST"
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed removing question: " + response.text);
+            raise SlideScoreErrorException("Failed removing question: " + response.text)
         return True
-    
+
     def set_slide_tma_map(self, study_id, image_id, tma_map_name):
-        response = self.perform_request("SetSlideTMAMap", {"studyId": study_id, "imageId": image_id, "tmaMapName": tma_map_name}, method="POST")
+        response = self.perform_request(
+            "SetSlideTMAMap",
+            {"studyId": study_id, "imageId": image_id, "tmaMapName": tma_map_name},
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed updating slide TMA: " + response.text);
+            raise SlideScoreErrorException(
+                "Failed updating slide TMA: " + response.text
+            )
 
     def create_tma_map(self, study_id, tma_map_filename):
-        response = self.perform_request("CreateTMAMap", {"studyId": study_id, "tmaMapFileName": tma_map_filename}, method="POST")
+        response = self.perform_request(
+            "CreateTMAMap",
+            {"studyId": study_id, "tmaMapFileName": tma_map_filename},
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed creating TMA map: " + response.text);
+            raise SlideScoreErrorException("Failed creating TMA map: " + response.text)
         return rjson["mapName"]
-        
+
     def is_slide_out_of_focus(self, study_id, image_id):
-        response = self.perform_request("IsSlideOutOfFocus", {"studyId": study_id, "imageId": image_id}, method="POST")
+        response = self.perform_request(
+            "IsSlideOutOfFocus",
+            {"studyId": study_id, "imageId": image_id},
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed checking out-of-focus: " + response.text);
+            raise SlideScoreErrorException(
+                "Failed checking out-of-focus: " + response.text
+            )
         return rjson["isOOF"]
 
-    def get_raw_tile(self, study_id, image_id, level, x, y, width, height,
-            jpeg_quality):
+    def get_raw_tile(
+        self, study_id, image_id, level, x, y, width, height, jpeg_quality
+    ):
         """
         Get slide pixels
         Parameters
         ----------
         study_id : int
         image_id : int
-        level: int 
+        level: int
             Level in the slide (0-highest detail), based on slide metadata
         x: int
         y: int
@@ -574,18 +703,28 @@ class APIClient(object):
         height: int
             Size of the requested region
         jpeg_quality: int
-        
+
         Returns
         -------
         jpeg file
 
-        
-        """    
-        response = self.perform_request("GetRawTile", {"studyid": study_id, "imageId": image_id,
-        "x": x, "y": y, "width": width, "height": height, "level": level, "jpegQuality": jpeg_quality})
-        return response        
 
-        
+        """
+        response = self.perform_request(
+            "GetRawTile",
+            {
+                "studyid": study_id,
+                "imageId": image_id,
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "level": level,
+                "jpegQuality": jpeg_quality,
+            },
+        )
+        return response
+
     def convert_to_anno2(self, items, metadata, output_path):
         """Converts a SlideScore Annotation Object to the new Anno2 zip based format
         Supports points, polygons/brush, or a :class:`Heatmap` instance (same union as :class:`Encoder`).
@@ -597,97 +736,157 @@ class APIClient(object):
         # Allow pre-loaded Points, Polygons, and Heatmap objects (match ``Encoder``)
         if not isinstance(items, (Points, Polygons, Heatmap)):
             items = read_slidescore_json(items)
-        
+
         encoder = Encoder(items, big_polygon_size_cutoff=100 * 100)
-        encoder.generate_tile_data(256)        
+        encoder.generate_tile_data(256)
         encoder.populate_lookup_tables()
-        
+
         if metadata:
             encoder.add_metadata(metadata)
 
         encoder.dump_to_file(output_path)
 
-
-    def convert_annotation_to_anno2(self, study_id, case_id, image_id, tma_core_id,
-            score_id, question, email, metadata):
+    def convert_annotation_to_anno2(
+        self,
+        study_id,
+        case_id,
+        image_id,
+        tma_core_id,
+        score_id,
+        question,
+        email,
+        metadata,
+    ):
         """Converts an existing annotation answer to the new Anno2 zip based format
         case_id, tma_core_id, score_id, and question are optional
         metadata must be a JSON object for example "{}"
         You have to specify one of score_id and question
         """
-        
-        response = self.perform_request("ConvertAnnotationToAnno2", {"studyId": study_id, "caseId": case_id, "imageId": image_id, 
-                "tmaCoreId": tma_core_id, "scoreId": score_id, "question": question, "email": email, "metadata": metadata}, 
-                method="POST")
+
+        response = self.perform_request(
+            "ConvertAnnotationToAnno2",
+            {
+                "studyId": study_id,
+                "caseId": case_id,
+                "imageId": image_id,
+                "tmaCoreId": tma_core_id,
+                "scoreId": score_id,
+                "question": question,
+                "email": email,
+                "metadata": metadata,
+            },
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed converting: " + response.text);
+            raise SlideScoreErrorException("Failed converting: " + response.text)
         return rjson["annoUUID"]
 
-    def create_anno2(self, study_id, case_id, image_id, tma_core_id,
-            score_id, question, email):
+    def create_anno2(
+        self, study_id, case_id, image_id, tma_core_id, score_id, question, email
+    ):
         """Creates a new Anno2 format record
         Returns object with  "uploadToken": "FEU...." and "annoUUID": "8f51008c-9ede-e8b4-cba8-55a2cf6c73bf",
-        
+
         You have to specify one of score_id and question
         """
-        
-        response = self.perform_request("CreateAnno2", {"studyId": study_id, "caseId": case_id, "imageId": image_id, 
-                "tmaCoreId": tma_core_id, "scoreId": score_id, "question": question, "email": email}, 
-                method="POST")
+
+        response = self.perform_request(
+            "CreateAnno2",
+            {
+                "studyId": study_id,
+                "caseId": case_id,
+                "imageId": image_id,
+                "tmaCoreId": tma_core_id,
+                "scoreId": score_id,
+                "question": question,
+                "email": email,
+            },
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed creating: " + response.text);
+            raise SlideScoreErrorException("Failed creating: " + response.text)
         return rjson
 
-        
     def generate_login_link(self, username, expires_on):
-        response = self.perform_request("GenerateLoginLink", {"username": username, "expiresOn": expires_on}, method="POST")
+        response = self.perform_request(
+            "GenerateLoginLink",
+            {"username": username, "expiresOn": expires_on},
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed generating link: " + response.text);
+            raise SlideScoreErrorException("Failed generating link: " + response.text)
         return rjson["link"]
 
     def generate_student_account(self, username, email, class_id):
-        response = self.perform_request("GenerateStudentAccount", {"username": username, "email": email, "classId": class_id}, method="POST")
+        response = self.perform_request(
+            "GenerateStudentAccount",
+            {"username": username, "email": email, "classId": class_id},
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed generating account: " + response.text);
+            raise SlideScoreErrorException(
+                "Failed generating account: " + response.text
+            )
         return rjson["password"]
 
     def get_sessions(self, studyid, email=None, imageid=None):
-        response = self.perform_request("Sessions", {"studyId": studyid, "imageId": imageid, "email": email})
+        response = self.perform_request(
+            "Sessions", {"studyId": studyid, "imageId": imageid, "email": email}
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed getting sessions: " + response.text);
+            raise SlideScoreErrorException("Failed getting sessions: " + response.text)
         return [SlideScoreSession(r) for r in rjson["sessions"]]
-        
+
     def get_session_events(self, studyid, sessionid):
-        response = self.perform_request("SessionEvents", {"studyId": studyid, "sessionId": sessionid})
+        response = self.perform_request(
+            "SessionEvents", {"studyId": studyid, "sessionId": sessionid}
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed getting session events: " + response.text);
+            raise SlideScoreErrorException(
+                "Failed getting session events: " + response.text
+            )
         return [SlideScoreSessionEvent(r) for r in rjson["events"]]
-        
+
     def upload_attachment(self, study_id, module_id, filename, label):
         """Uploads an attachment
         For adding attachments to slide, case or study set the study_di, for a teaching module description set the module_id.
         Returns a link element for the attachment that can be added to a description
-        
+
         You have to specify one of study_id or module_id - module_id is for settings description of teaching modules
         """
-        filenameonly=os.path.basename(filename)
-        response = self.perform_request("RequestUploadAttachment", {"studyId": study_id, "moduleId": module_id, "filename": filenameonly}, 
-                method="POST")
+        filenameonly = os.path.basename(filename)
+        response = self.perform_request(
+            "RequestUploadAttachment",
+            {"studyId": study_id, "moduleId": module_id, "filename": filenameonly},
+            method="POST",
+        )
         rjson = response.json()
         if not rjson["success"]:
-            raise SlideScoreErrorException("Failed requesting upload: " + response.text);
-        oururl=self.end_point.replace('/Api/','')
-        tempApiToken=rjson['token']
-        folder=rjson['folder']
-        new_filename=rjson['filename']
-        att_id=rjson['attId']
-        uploadClient=APIClient(oururl, tempApiToken)
+            raise SlideScoreErrorException("Failed requesting upload: " + response.text)
+        oururl = self.end_point.replace("/Api/", "")
+        tempApiToken = rjson["token"]
+        folder = rjson["folder"]
+        new_filename = rjson["filename"]
+        att_id = rjson["attId"]
+        uploadClient = APIClient(oururl, tempApiToken)
         uploadClient.upload_file(filename, folder, new_filename)
-        shortguid=new_filename.split('-')[0]
-        return '<div><a href="'+oururl+'/a/'+str(att_id)+'/'+shortguid+'/'+filenameonly+'" target="_blank" rel="noopener" class="jsSquireAttachment jsSquireLink" style="display: inline-block;"><span class="glyphicon glyphicon glyphicon-paperclip"> </span>&nbsp;'+label+'&nbsp;</a><br></div>'
+        shortguid = new_filename.split("-")[0]
+        return (
+            '<div><a href="'
+            + oururl
+            + "/a/"
+            + str(att_id)
+            + "/"
+            + shortguid
+            + "/"
+            + filenameonly
+            + '" target="_blank" rel="noopener" class="jsSquireAttachment jsSquireLink" style="display: inline-block;"><span class="glyphicon glyphicon glyphicon-paperclip"> </span>&nbsp;'
+            + label
+            + "&nbsp;</a><br></div>"
+        )

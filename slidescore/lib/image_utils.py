@@ -1,5 +1,7 @@
-import io 
+import io
+
 import png
+
 
 def gen_matrix(num_row, num_col):
     """Generate a python based matrix with a number of columns and rows."""
@@ -9,6 +11,7 @@ def gen_matrix(num_row, num_col):
         matrix.append(column)
     return matrix
 
+
 def encode_png(matrix, width, height, bitdepth=1):
     """Encode a matrix of pixel values into PNG with the best compression."""
     writer = png.Writer(width, height, greyscale=True, bitdepth=bitdepth, compression=9)
@@ -17,6 +20,7 @@ def encode_png(matrix, width, height, bitdepth=1):
     f.seek(0)
     png_buf = f.read()
     return png_buf
+
 
 def get_point_matrix(pointsArr, tile_size):
     """Turns a list of points into a matrix that has 0 for empty pixels and 1 for filled pixels."""
@@ -32,6 +36,7 @@ def get_png_bytes(pointsArr, tile_size):
     """Encodes a list of points that fall within tile_size x tile_size pixels into a PNG."""
     matrix = get_point_matrix(pointsArr, tile_size)
     return encode_png(matrix, tile_size, tile_size)
+
 
 def lookup_table_2_png(lookup_table_container):
     """Encodes a lookup table/density map into a greyscale PNG."""

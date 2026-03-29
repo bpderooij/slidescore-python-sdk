@@ -1,29 +1,32 @@
 import array
 import json
-import math
 import logging
+import math
+
+from .AnnoClasses import EfficientArray, Heatmap, Points, Polygons
+from .PolygonContainer import PolygonContainer
 
 _logger = logging.getLogger(__name__)
 
-from .AnnoClasses import EfficientArray, Points, Polygons, Heatmap
-from .PolygonContainer import PolygonContainer
-
 # Importing functions
-def read_tsv(path: str, points_type: str, support_experimental = False):
+def read_tsv(path: str, points_type: str, support_experimental=False):
     """Function to parse either points or polygons from a .tsv file on disk. Reads the first line to determine
-    whether points or polygons are encoded. See their respective functions for the expected format on disk."""
+    whether points or polygons are encoded. See their respective functions for the expected format on disk.
+    """
     items = None
 
-    with open(path, 'r') as fh:
+    with open(path) as fh:
         # Read the first line to determine if we are dealing with points or polygons
         first_line = fh.readline()
         line_parts = first_line.split()
 
     are_points = len(line_parts) == 2
-    is_heatmap = line_parts[0].lower() == 'heatmap'
-    is_binary_heatmap = line_parts[0].lower() == 'binary-heatmap'
+    is_heatmap = line_parts[0].lower() == "heatmap"
+    is_binary_heatmap = line_parts[0].lower() == "binary-heatmap"
     if is_binary_heatmap and not support_experimental:
-        raise Exception('Wanted to encode a binary heatmap but --experimental is not present')
+        raise Exception(
+            "Wanted to encode a binary heatmap but --experimental is not present"
+        )
 
     if is_heatmap:
         items = read_tsv_heatmap(path)
@@ -35,24 +38,25 @@ def read_tsv(path: str, points_type: str, support_experimental = False):
             items.name = "mask"
     else:
         items = read_tsv_polygons(path)
-        
+
     if len(items) == 0:
         raise ValueError("No items loaded")
 
     return items
 
+
 def read_tsv_points(path: str):
     """Read lines from a file to extract points. One point, consisting of 2 coordinates seperated by a tab, should be encoded per line.
     Like this:
     ```
-    x1 y1  
-    x2 y2  
+    x1 y1
+    x2 y2
     etc.
     ```
     """
     items = Points()
 
-    with open(path, 'r') as fh:
+    with open(path) as fh:
         for raw_line in fh:
             line_parts = raw_line.strip().split()
             if len(line_parts) < 2:
@@ -63,15 +67,16 @@ def read_tsv_points(path: str):
 
     return items
 
+
 def read_tsv_polygons(path: str):
     """Read lines from a file to extract polygons. One polygon is encoded per line, with all the coordinates
     seperated by tab (or any whitespace), like this: `x1  y1  x2 y2  etc.`
     """
     items = Polygons()
 
-    with open(path, 'r') as fh:
+    with open(path) as fh:
         for raw_line in fh:
-            
+
             line_parts = raw_line.strip().split()
             if len(line_parts) < 2:
                 continue
@@ -81,17 +86,22 @@ def read_tsv_polygons(path: str):
 
     return items
 
+
 def read_geo_json(path: str):
     """Assumed are the QuPath GeoJSON files, containing only polygons or points."""
     # Return either of these, show warning if both have entries
     polygons = Polygons()
     points = Points()
 
-    with open(path, 'r') as fh:
+    with open(path) as fh:
         data = json.load(fh)
-    
+
     polygon_or_points_generator = extract_geojson(data)
-    for metadata, positive_vertices, negative_vertices_list in polygon_or_points_generator:
+    for (
+        metadata,
+        positive_vertices,
+        negative_vertices_list,
+    ) in polygon_or_points_generator:
         if len(positive_vertices) == 1:
             # This is a point, not a polygon
             point = positive_vertices[0]
@@ -99,7 +109,7 @@ def read_geo_json(path: str):
             points.addPoint(x, y)
 
             if metadata is not None:
-                points.metadata[f'{x},{y}'] = metadata
+                points.metadata[f"{x},{y}"] = metadata
         else:
             # Round the positive vertices into ints and add them to a Polygons class
             cur_polygon = []
@@ -132,9 +142,12 @@ def read_geo_json(path: str):
         return polygons
 
     # We got _both_ polygons and points
-    _logger.warning("Detected BOTH points and polygons in GeoJSON, only continuing with polygons")
+    _logger.warning(
+        "Detected BOTH points and polygons in GeoJSON, only continuing with polygons"
+    )
     _logger.warning("Please remove the points from the GeoJSON to prevent ambiguity")
     return polygons
+
 
 def extract_geojson(data):
     """Yields all polygons and points and their negative vertices from a QuPath GeoJSON data object like so:
@@ -145,26 +158,31 @@ def extract_geojson(data):
     for feature in data["features"]:
         if "geometry" not in feature:
             continue
-        metadata = feature.get('properties')
+        metadata = feature.get("properties")
 
         geometry = feature["geometry"]
         if geometry["type"] == "Polygon":
             # The first entry is the "exterior" ring and the others "interior" rings
             # so the second ones are deemed "negative" polygons, because they are holes
             yield (metadata, geometry["coordinates"][0], geometry["coordinates"][1:])
-            
+
             if "nucleusGeometry" not in feature:
                 continue
             nucl_geometry = feature["nucleusGeometry"]
             if nucl_geometry["type"] != "Polygon":
                 continue
-            yield (metadata, nucl_geometry["coordinates"][0], nucl_geometry["coordinates"][1:])
+            yield (
+                metadata,
+                nucl_geometry["coordinates"][0],
+                nucl_geometry["coordinates"][1:],
+            )
         elif geometry["type"] == "MultiPolygon":
             for polygon in geometry["coordinates"]:
                 yield (None, polygon[0], polygon[1:])
         elif geometry["type"] == "Point":
             # coordinates is [x, y]; yield once as a single-point polygon
             yield (metadata, [geometry["coordinates"]], [])
+
 
 def read_slidescore_json(data):
     """Parses JSON's that are created using the SlideScore Front-end.
@@ -182,36 +200,36 @@ def read_slidescore_json(data):
         raise Exception("Data is an empty list, cannot convert")
 
     # First check if data is points, they are stored as a raw list of xy pairs
-    if "type" not in data[0]: 
-        if 'x' in data[0] and 'y' in data[0]:
+    if "type" not in data[0]:
+        if "x" in data[0] and "y" in data[0]:
             items = Points()
-            items.name = "points" # Define that it is not a mask, but circles
+            items.name = "points"  # Define that it is not a mask, but circles
             for point in data:
                 x = int(point["x"])
                 y = int(point["y"])
                 items.addPoint(x, y)
             return items
         else:
-            raise Exception(f'Unsupported slidescore JSON: type not specified')
+            raise Exception("Unsupported slidescore JSON: type not specified")
 
-    # Then check if heatmap or brush / polygon    
+    # Then check if heatmap or brush / polygon
     if data[0]["type"] == "heatmap":
-        x_offset = data[0]["x"] if 'x' in data[0] else 0
-        y_offset = data[0]["y"] if 'y' in data[0] else 0
+        x_offset = data[0]["x"] if "x" in data[0] else 0
+        y_offset = data[0]["y"] if "y" in data[0] else 0
 
         items = Heatmap(
-            data = data[0]["data"], 
-            x_offset = x_offset, 
-            y_offset = y_offset,
+            data=data[0]["data"],
+            x_offset=x_offset,
+            y_offset=y_offset,
             # Divide total height by num pixels in column to get height per pixel
-            size_per_pixel = round(data[0]["height"] / len(data[0]["data"]))
+            size_per_pixel=round(data[0]["height"] / len(data[0]["data"])),
         )
         return items
 
     items = Polygons()
     # Either polygon or brush entries, both are polygons
     for entry in data:
-        if entry["type"].lower() == 'polygon':
+        if entry["type"].lower() == "polygon":
             # Process polygon points
             cur_polygon = []
             for point in entry["points"]:
@@ -219,13 +237,13 @@ def read_slidescore_json(data):
                 cur_polygon.extend([x, y])
             polygon_i = items.addPolygon(cur_polygon)
             # Add any labels if present
-            if 'labels' in entry:
-                for label in entry['labels']:
-                    label['polygon_i'] = polygon_i
+            if "labels" in entry:
+                for label in entry["labels"]:
+                    label["polygon_i"] = polygon_i
                     items.labels.append(label)
-        elif entry["type"].lower() == 'brush':
+        elif entry["type"].lower() == "brush":
             # Process brush polygon, positive polygons first
-            pos_polygon_is = [] # Store the indices of all the postive polygons
+            pos_polygon_is = []  # Store the indices of all the postive polygons
             for polygon in entry["positivePolygons"]:
                 cur_polygon = []
                 for point in polygon:
@@ -245,41 +263,43 @@ def read_slidescore_json(data):
                 for pos_polygon_i in pos_polygon_is:
                     items.linkPosPolygonToNegPolygon(pos_polygon_i, neg_polygon_i)
             # Add any labels if present
-            if 'labels' in entry:
-                for label in entry['labels']:
-                    label['polygon_i'] = pos_polygon_is[0]
+            if "labels" in entry:
+                for label in entry["labels"]:
+                    label["polygon_i"] = pos_polygon_is[0]
                     items.labels.append(label)
-        elif entry["type"].lower() == 'ellipse':      
-            #Turn ellipse into 40 point polygon
-            #adapted from https://stackoverflow.com/questions/22694850/approximating-an-ellipse-with-a-polygon
+        elif entry["type"].lower() == "ellipse":
+            # Turn ellipse into 40 point polygon
+            # adapted from https://stackoverflow.com/questions/22694850/approximating-an-ellipse-with-a-polygon
             center = entry["center"]
             size = entry["size"]
             retq1 = []
             retq2 = []
             retq3 = []
             retq4 = []
-            n=10
+            n = 10
 
             for i in range(n):
                 theta = math.pi / 2 * i / n
-                fi = math.pi - math.atan(math.tan(theta) * math.sqrt(size['x'] / size['y']))
-                cos = size['x'] * math.cos(fi)
-                sin = size['y'] * math.sin(fi)
+                fi = math.pi - math.atan(
+                    math.tan(theta) * math.sqrt(size["x"] / size["y"])
+                )
+                cos = size["x"] * math.cos(fi)
+                sin = size["y"] * math.sin(fi)
 
-                x = round(center['x'] + cos)
-                y = round(center['y'] + sin)
+                x = round(center["x"] + cos)
+                y = round(center["y"] + sin)
                 retq1.append([x, y])
 
-                x = round(center['x'] - cos)
-                y = round(center['y'] + sin)
+                x = round(center["x"] - cos)
+                y = round(center["y"] + sin)
                 retq2.append([x, y])
 
-                x = round(center['x'] - cos)
-                y = round(center['y'] - sin)
+                x = round(center["x"] - cos)
+                y = round(center["y"] - sin)
                 retq3.append([x, y])
 
-                x = round(center['x'] + cos)
-                y = round(center['y'] - sin)
+                x = round(center["x"] + cos)
+                y = round(center["y"] - sin)
                 retq4.append([x, y])
 
             retq2.reverse()
@@ -296,30 +316,39 @@ def read_slidescore_json(data):
 
             polygon_i = items.addPolygon(cur_polygon)
             # Add any labels if present
-            if 'labels' in entry:
-                for label in entry['labels']:
-                    label['polygon_i'] = polygon_i
+            if "labels" in entry:
+                for label in entry["labels"]:
+                    label["polygon_i"] = polygon_i
                     items.labels.append(label)
-        elif entry["type"].lower() == 'rect':      
-            #Turn rect into polygon
-            #adapted from https://stackoverflow.com/questions/22694850/approximating-an-ellipse-with-a-polygon
+        elif entry["type"].lower() == "rect":
+            # Turn rect into polygon
+            # adapted from https://stackoverflow.com/questions/22694850/approximating-an-ellipse-with-a-polygon
             corner = entry["corner"]
             size = entry["size"]
-            cur_polygon = [round(corner["x"]), round(corner["y"]),
-                round(corner["x"]+size["x"]), round(corner["y"]),
-                round(corner["x"]+size["x"]), round(corner["y"]+size["y"]),
-                round(corner["x"]), round(corner["y"]+size["y"])]
-            
+            cur_polygon = [
+                round(corner["x"]),
+                round(corner["y"]),
+                round(corner["x"] + size["x"]),
+                round(corner["y"]),
+                round(corner["x"] + size["x"]),
+                round(corner["y"] + size["y"]),
+                round(corner["x"]),
+                round(corner["y"] + size["y"]),
+            ]
+
             polygon_i = items.addPolygon(cur_polygon)
             # Add any labels if present
-            if 'labels' in entry:
-                for label in entry['labels']:
-                    label['polygon_i'] = polygon_i
-                    items.labels.append(label)                    
+            if "labels" in entry:
+                for label in entry["labels"]:
+                    label["polygon_i"] = polygon_i
+                    items.labels.append(label)
 
         else:
-            raise Exception(f'Unsupported slidescore JSON type: "{entry["type"]}" not supported')
+            raise Exception(
+                f'Unsupported slidescore JSON type: "{entry["type"]}" not supported'
+            )
     return items
+
 
 def read_tsv_heatmap(path: str):
     """Read lines from a file to extract heatmap points. One point, consisting of 2 coordinates along with a value seperated by a tab, should be encoded per line.
@@ -332,7 +361,7 @@ def read_tsv_heatmap(path: str):
     etc.
     ```
     """
-    with open(path, 'r') as fh:
+    with open(path) as fh:
         first_line_parts = fh.readline().split()
         x_offset = int(first_line_parts[1])
         y_offset = int(first_line_parts[2])
@@ -348,7 +377,7 @@ def read_tsv_heatmap(path: str):
             max_y = max(max_y, y + 1)
             max_x = max(max_x, x + 1)
 
-        fh.seek(prev_poss) # go back to beginning of data
+        fh.seek(prev_poss)  # go back to beginning of data
 
         # Construct the heatmap
         data = [[0] * max_x for _ in range(max_y)]
@@ -361,6 +390,7 @@ def read_tsv_heatmap(path: str):
 
     return heatmap
 
+
 def read_tsv_binary_heatmap(path: str):
     """Read lines from a file to extract binary heatmap points. One point, consisting of 2 coordinates seperated by a tab, should be encoded per line.
     The first line should be a header, with the first word being "binary-heatmap", then the x and y offset, and last the size per pixel
@@ -372,7 +402,7 @@ def read_tsv_binary_heatmap(path: str):
     etc.
     ```
     """
-    with open(path, 'r') as fh:
+    with open(path) as fh:
         first_line_parts = fh.readline().split()
         x_offset = int(first_line_parts[1])
         y_offset = int(first_line_parts[2])
@@ -388,34 +418,33 @@ def read_tsv_binary_heatmap(path: str):
             max_y = max(max_y, y + 1)
             max_x = max(max_x, x + 1)
 
-        fh.seek(prev_poss) # go back to beginning of data
+        fh.seek(prev_poss)  # go back to beginning of data
 
         # Construct the heatmap
         data = [[0] * max_x for _ in range(max_y)]
         # Parse again to save the results
 
-
         # Construct the heatmap
-        heatmap = Heatmap(data, x_offset, y_offset, size_per_pixel, name='binary-heatmap')
+        heatmap = Heatmap(
+            data, x_offset, y_offset, size_per_pixel, name="binary-heatmap"
+        )
         for line in fh:
             line_parts = line.split()
             x, y = int(line_parts[0]), int(line_parts[1])
             heatmap.setPoint(x, y, 255)
     return heatmap
 
+
 # Export functions
-supported_types = {
-    'B': 'uint8',
-    'H': 'uint16',
-    'I': 'uint32'
-}
+supported_types = {"B": "uint8", "H": "uint16", "I": "uint32"}
+
 
 def encode_typed_arr(obj):
     """Encodes a array.array into a bytebuffer and container object"""
     if len(obj) == 0:
         return []
     if obj.typecode not in supported_types:
-        raise Exception('Unsupported typed array')
+        raise Exception("Unsupported typed array")
 
     array_type = supported_types[obj.typecode]
 
@@ -423,9 +452,10 @@ def encode_typed_arr(obj):
         "isTypedArray": True,
         "bytes": obj.tobytes(),
         "type": array_type,
-        "len": len(obj)
+        "len": len(obj),
     }
     return typed_array_obj
+
 
 def encode_effecient_arr(obj: EfficientArray):
     """Encodes an EfficientArray into a container object with a destructered representation"""
@@ -434,9 +464,10 @@ def encode_effecient_arr(obj: EfficientArray):
         "data": {
             "offsetArray": obj.offsetArray,
             "valuesArray": obj.valuesArray,
-            "length": len(obj)
-        }
+            "length": len(obj),
+        },
     }
+
 
 def encode_polygon_container(obj: PolygonContainer):
     """Encodes a polygon container into a space effecient polygons buffer and the tile and negative polygons information"""
@@ -444,11 +475,12 @@ def encode_polygon_container(obj: PolygonContainer):
         "isPolygonContainer": True,
         "data": {
             "allTiles": obj.allTiles,
-            "polygons": obj.encode_polygons(), # encode_effecient_arr(obj.polygons),
+            "polygons": obj.encode_polygons(),  # encode_effecient_arr(obj.polygons),
             "negativePolygons": obj.polygons.negative_polygons_i,
-            "tileSize": obj.tile_size
-        }
+            "tileSize": obj.tile_size,
+        },
     }
+
 
 def msgpack_encoder(obj):
     """Encoder that calls encode_polygon_container & encode_typed_arr for their respective objects"""
@@ -458,9 +490,11 @@ def msgpack_encoder(obj):
     if isinstance(obj, array.array):
         return encode_typed_arr(obj)
 
+
 # miscellaneous
 
 _NOTICE_LEVEL = 25  # between INFO (20) and WARNING (30)
+
 
 def get_logger(verbosity: int) -> logging.Logger:
     """Configure and return a logger with the given verbosity level.
