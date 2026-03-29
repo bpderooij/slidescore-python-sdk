@@ -89,5 +89,30 @@ def test_upload_study_results():
     except:
         assert True # Failed succesfully!
 
+
+def test_slidescore_result_typed_json_answer_sets_annotations():
+    r = slidescore.SlideScoreResult({
+        "id": 1,
+        "imageID": 10,
+        "imageName": "slide",
+        "user": "u",
+        "question": "q",
+        "answer": '[{"type":"polygon","points":[{"x":1,"y":2}]}]',
+    })
+    assert r.annotations[0]["type"] == "polygon"
+
+
+def test_slidescore_result_plain_xy_json_answer_sets_points():
+    r = slidescore.SlideScoreResult({
+        "id": 1,
+        "imageID": 10,
+        "imageName": "slide",
+        "user": "u",
+        "question": "q",
+        "answer": '[{"x": 10, "y": 20}]',
+    })
+    assert r.points[0]["x"] == 10
+
+
 if __name__ == "__main__":
     sys.exit('This file is meant to be ran by PyTest')

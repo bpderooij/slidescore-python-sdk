@@ -1,4 +1,5 @@
 # coding=utf-8
+from collections.abc import Mapping
 import json
 import sys
 import requests
@@ -52,8 +53,8 @@ class SlideScoreResult:
 
         if self.answer is not None and self.answer[:2] == '[{':
             annos = json.loads(self.answer)
-            if len(annos) > 0:
-                if hasattr(annos[0], 'type'):
+            if len(annos) > 0 and isinstance(annos[0], Mapping):
+                if annos[0].get("type") is not None:
                     self.annotations = annos
                 else:
                     self.points = annos
@@ -349,7 +350,7 @@ class APIClient(object):
     def upload_ASAP(self, imageid, user, questions_map, annotation_name, asap_annotation):
         response = self.perform_request("UploadASAPAnnotations", {
                  "imageid": imageid,
-                 "questionsMap": '\n'.join(key+";"+value for key, val in questions_map.items()),
+                 "questionsMap": '\n'.join(f"{key};{val}" for key, val in questions_map.items()),
                  "user": user,
                  "annotationName": annotation_name,
                  "asapAnnotation": asap_annotation}
@@ -383,8 +384,6 @@ class APIClient(object):
         tuple
             Pair consisting of url, cookie.
         """
-        if self.base_url is None:
-            raise RuntimeError
         response = self.perform_request("GetTileServer?imageId="+str(imageid), None,  method="GET")
         rjson = response.json()
         return ( 
