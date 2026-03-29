@@ -51,13 +51,16 @@ class SlideScoreResult:
         self.question = dict['question']
         self.answer = dict['answer']
 
-        if self.answer is not None and self.answer[:2] == '[{':
-            annos = json.loads(self.answer)
-            if len(annos) > 0 and isinstance(annos[0], Mapping):
-                if annos[0].get("type") is not None:
-                    self.annotations = annos
-                else:
-                    self.points = annos
+        if self.answer is not None and len(self.answer) >= 2 and self.answer[:2] == '[{':
+            try:
+                annos = json.loads(self.answer)
+                if len(annos) > 0 and isinstance(annos[0], Mapping):
+                    if annos[0].get("type") is not None:
+                        self.annotations = annos
+                    else:
+                        self.points = annos
+            except json.JSONDecodeError:
+                pass
                     
     def toRow(self):
         """
