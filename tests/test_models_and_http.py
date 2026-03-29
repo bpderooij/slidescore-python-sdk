@@ -240,7 +240,7 @@ def test_slide_score_result_as_slidescore_results_row() -> None:
     assert not row.as_slidescore_results_row().startswith("\n")
 
 
-def test_upload_results_posts_form_body_not_leading_newline() -> None:
+def test_upload_results_posts_form_body_with_discarded_header_line() -> None:
     posted: dict = {}
 
     def fake_post(url, verify=True, headers=None, params=None, data=None, **kwargs):
@@ -266,11 +266,12 @@ def test_upload_results_posts_form_body_not_leading_newline() -> None:
     with patch("slidescore.slidescore.requests.post", side_effect=fake_post):
         client.upload_results(3, [a])
     assert posted["data"]["studyId"] == 3
-    assert not str(posted["data"]["results"]).startswith("\n")
-    assert posted["data"]["results"] == a.as_slidescore_results_row()
+    results = str(posted["data"]["results"])
+    assert results.startswith("#header\n")
+    assert results == "#header\n" + a.as_slidescore_results_row()
 
 
-def test_upload_results_joins_multiple_rows_with_single_newline() -> None:
+def test_upload_results_joins_multiple_rows_after_header_line() -> None:
     posted: dict = {}
 
     def fake_post(url, verify=True, headers=None, params=None, data=None, **kwargs):
@@ -298,10 +299,11 @@ def test_upload_results_joins_multiple_rows_with_single_newline() -> None:
     with patch("slidescore.slidescore.requests.post", side_effect=fake_post):
         client.upload_results(9, [r1, r2])
     body = posted["data"]["results"]
-    assert body.count("\n") == 1
-    a, b = body.split("\n", 1)
-    assert a == r1.as_slidescore_results_row()
-    assert b == r2.as_slidescore_results_row()
+    assert body.count("\n") == 2
+    header, row1, row2 = body.split("\n", 2)
+    assert header == "#header"
+    assert row1 == r1.as_slidescore_results_row()
+    assert row2 == r2.as_slidescore_results_row()
 
 
 def test_slide_score_session_keyword_constructor() -> None:

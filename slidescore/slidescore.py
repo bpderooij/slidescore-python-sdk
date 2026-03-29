@@ -66,9 +66,22 @@ def _to_upload_cell(value: object) -> str:
     return "" if value is None else str(value)
 
 
+# SlideScore discards the first line of ``results`` (treated as a TSV header). The
+# API docs show ``"#header\\n" + row`` as a minimal placeholder; using a real header
+# line (e.g. from Scores export) is also fine. See UploadResults in the SlideScore API docs.
+_UPLOAD_RESULTS_DISCARDED_HEADER_LINE = "#header"
+
+
 def _encode_upload_results_payload(results: Sequence[SlideScoreResult]) -> str:
-    """Join UploadResults TSV rows with newlines (Swagger multiline ``results``)."""
-    return "\n".join(row.as_slidescore_results_row() for row in results)
+    """Build the multiline ``results`` form field for ``POST /Api/UploadResults``.
+
+    Prepends a placeholder header line so the server does not treat the first
+    real scoring row as the header (which would drop that row).
+    """
+    rows = "\n".join(row.as_slidescore_results_row() for row in results)
+    if not rows:
+        return _UPLOAD_RESULTS_DISCARDED_HEADER_LINE
+    return f"{_UPLOAD_RESULTS_DISCARDED_HEADER_LINE}\n{rows}"
 
 
 @dataclass(init=False)
@@ -672,6 +685,10 @@ class APIClient:
         POST ``/Api/UploadResults``. Swagger lists ``studyId`` and multiline
         ``results`` as query parameters; the server also accepts the same keys
         as form fields, which avoids URL length limits for large imports.
+
+        The first line of ``results`` is **ignored** (header row). This client
+        prefixes a ``#header`` line per the SlideScore API documentation so
+        every :class:`SlideScoreResult` row is imported.
         """
         payload = _encode_upload_results_payload(results)
         response = self.perform_request(
