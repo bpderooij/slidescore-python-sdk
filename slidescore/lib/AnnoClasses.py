@@ -89,9 +89,9 @@ class Heatmap():
     x_offset: int
     y_offset: int
     size_per_pixel: int
-    name = "heatmap"
+    name: str
 
-    def __init__(self, data: list, x_offset: int, y_offset: int, size_per_pixel: int):
+    def __init__(self, data: list, x_offset: int, y_offset: int, size_per_pixel: int, name: str = "heatmap"):
         # data is 2d matrix containing the pixels
         self.matrix = self.generate_2d_ubyte_array(len(data), len(data[0]))
         try:
@@ -102,6 +102,7 @@ class Heatmap():
         self.x_offset = x_offset
         self.y_offset = y_offset
         self.size_per_pixel = size_per_pixel
+        self.name = name
 
         super().__init__()
 

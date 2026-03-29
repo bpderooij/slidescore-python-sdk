@@ -396,12 +396,11 @@ def read_tsv_binary_heatmap(path: str):
 
 
         # Construct the heatmap
-        heatmap = Heatmap(data, x_offset, y_offset, size_per_pixel)
+        heatmap = Heatmap(data, x_offset, y_offset, size_per_pixel, name='binary-heatmap')
         for line in fh:
             line_parts = line.split()
             x, y = int(line_parts[0]), int(line_parts[1])
             heatmap.setPoint(x, y, 255)
-    heatmap.name = 'binary-heatmap'
     return heatmap
 
 # Export functions
