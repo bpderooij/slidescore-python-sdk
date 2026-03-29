@@ -108,10 +108,13 @@ def simplifyPolygons(polygons_arr, tolerance=1.0):
     return simp_polygons_arr
 
 if __name__ == "__main__":
+    import logging as _logging
+    _logging.basicConfig(level=_logging.DEBUG)
+    _log = _logging.getLogger(__name__)
     from .AnnoClasses import Polygons
-    print("Testing simplify algorithm")
+    _log.debug("Testing simplify algorithm")
     almost_triangle = [0, 0, 100, 100, 105, 95, 200, 0]
     polygons = Polygons()
     polygons.addPolygon(almost_triangle)
     res = simplify(almost_triangle, 1)
-    print(list(res))
+    _log.debug("%s", list(res))

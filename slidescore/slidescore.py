@@ -606,7 +606,6 @@ class APIClient(object):
             encoder.add_metadata(metadata)
 
         encoder.dump_to_file(output_path)
-        print('Done converting to anno2')
 
 
     def convert_annotation_to_anno2(self, study_id, case_id, image_id, tma_core_id,

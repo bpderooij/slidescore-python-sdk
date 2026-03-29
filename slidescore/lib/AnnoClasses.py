@@ -1,8 +1,11 @@
 from collections.abc import Sequence
 from typing import Dict, List, Union
 import array
+import logging
 
 from slidescore.lib.simplify import simplifyPolygons
+
+_logger = logging.getLogger(__name__)
 # import numpy as np
 
 class Points(Sequence):
@@ -170,7 +173,7 @@ class EfficientArray():
     def getValues(self, i: int):
         """Retrieve an entry from the values array"""
         if i >= self.curOffsetIndex:
-            print("Trying to get i", i, "but max is", self.curOffsetIndex)
+            _logger.error("Trying to get i %s but max is %s", i, self.curOffsetIndex)
             return None
         start = self.offsetArray[i]
         end = self.offsetArray[i + 1]

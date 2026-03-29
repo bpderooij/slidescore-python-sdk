@@ -1,6 +1,6 @@
 import copy
+import logging
 import math
-import array
 import json
 import tarfile
 import zipfile
@@ -13,7 +13,9 @@ import brotli
 from .image_utils import get_png_bytes, lookup_table_2_png, encode_png
 from .AnnoClasses import Points, Polygons, Heatmap, Items, Item
 from .PolygonContainer import PolygonContainer
-from .utils import log, msgpack_encoder
+from .utils import msgpack_encoder
+
+_logger = logging.getLogger(__name__)
 
 class Encoder():
     """Encompassing class to encode AnnoClasses"""
@@ -49,18 +51,17 @@ class Encoder():
         self.user_metadata = {}
 
         if isinstance(items, Points):
-            log("Loaded", self.dataItems["numItems"], "points in encoder, type:", type_string)
+            _logger.debug("Loaded %s points in encoder, type: %s", self.dataItems["numItems"], type_string)
         elif isinstance(items, Polygons):
             self.items = copy.deepcopy(items)
             num_points = int(len(self.items.polygons.valuesArray) / 2)
-            log("Loaded", self.dataItems["numItems"], "polygons in encoder, with num points", num_points)
+            _logger.debug("Loaded %s polygons in encoder, with num points %s", self.dataItems["numItems"], num_points)
             self.items.simplify()
             num_points = int(len(self.items.polygons.valuesArray) / 2)
-            log("Simplified to num points", num_points)
-
+            _logger.debug("Simplified to num points %s", num_points)
 
         elif isinstance(items, Heatmap):
-            log("Loaded", self.dataItems["numItems"], f"byte {items.name} in encoder, with shape", len(self.items.matrix), len(self.items.matrix[0]))
+            _logger.debug("Loaded %s byte %s in encoder, with shape %s %s", self.dataItems["numItems"], items.name, len(items.matrix), len(items.matrix[0]))
 
     def calc_rect_around_item(self, item: Item):
         """Calculates a bounding box around a point or polygon, if it is a point the rectangle is the point"""
@@ -139,7 +140,7 @@ class Encoder():
         is_points = self.items.name == 'points' # Could also be mask
 
         if (are_few_points and is_points):
-            log(f"Detected few points ({len(items)}) , saving anno1 JSON")
+            _logger.debug("Detected few points (%s), saving anno1 JSON", len(items))
             # Instead encode as a Anno1 JSON, that will get compressed when dumping to a file
             anno1_points = [{"x": img_x, "y": img_y} for img_x, img_y in items]
             return json.dumps(anno1_points)
@@ -168,20 +169,20 @@ class Encoder():
         # encode as JSON anyway
         num_points_per_tile = len(items) / num_tiles
         if num_points_per_tile < self.low_density_cutoff and is_points:
-            log(f"Detected low density of points ({round(num_points_per_tile)} / tile), saving anno1 JSON")
+            _logger.debug("Detected low density of points (%s / tile), saving anno1 JSON", round(num_points_per_tile))
             anno1_points = [{"x": img_x, "y": img_y} for img_x, img_y in items]
             return json.dumps(anno1_points)
 
 
         # When we are done binning all points into the tiles, compress the tiles
         # into PNGs. A single PNG is a mask.
-        log("Compressing tiles as png's", num_tiles, len(items), len(items) / num_tiles)
+        _logger.debug("Compressing tiles as png's: %s tiles, %s points, %.1f pts/tile", num_tiles, len(items), len(items) / num_tiles)
         for tile_y in tile_bins:
             for tile_x in tile_bins[tile_y]:
                 tile = tile_bins[tile_y][tile_x]
                 img_bytes = get_png_bytes(tile, tile_size)
                 tile_bins[tile_y][tile_x] = img_bytes
-        log("Done compressing tiles")
+        _logger.debug("Done compressing tiles")
         return tile_bins
 
     def bin_polygons_into_tiles(self, tile_size: int):
@@ -207,11 +208,11 @@ class Encoder():
         """Bins items into seperate "tiles", which are then used to create a density map PNG to give a simplified representation
         of the items that can easily be process/drawn. """
         if isinstance(self.items, Heatmap):
-            log("Skipping lookup table generation for heatmap")
+            _logger.debug("Skipping lookup table generation for heatmap")
             return
-        
+
         if len(self.items) < self.few_points_cutoff and self.items.name == 'points':
-            log("Skipping lookup table generation for few points")
+            _logger.debug("Skipping lookup table generation for few points")
             return
 
         for tile_size in [32, 256]:
@@ -225,7 +226,7 @@ class Encoder():
             
             lookup_table['png'] = lookup_table_2_png(lookup_table)
             self.dataLookup.append(lookup_table)
-            log("Done with lookup table of size", tile_size)
+            _logger.debug("Done with lookup table of size %s", tile_size)
 
     def bin_items_into_lookup_table(self, tile_size: int):
         """Method to bin items into "tiles" of a certain size and keep track on how many items fall inside such a tile.
@@ -305,7 +306,7 @@ class Encoder():
 
     def dump_to_file(self, path: str):
         """Dumps the encoded items to a ZIP file on disk. Also encodes the polygon if needed."""
-        log("Encoding and dumping to zipfile")
+        _logger.debug("Encoding and dumping to zipfile")
 
         if not path.endswith('.zip'):
             path += '.zip'

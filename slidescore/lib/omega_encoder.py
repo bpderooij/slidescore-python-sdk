@@ -105,38 +105,42 @@ class OmegaEncoder():
 
 def stress_test_omega_encoding():
     """Testing method to see how fast the encoding and decoding is for the OmegaEncoder class above"""
+    import logging as _logging
     import time
-    import random
     import brotli
+    _log = _logging.getLogger(__name__)
     num_points = 100 * 1000
     random_ints = [(i % 256) + 1 for i in range(num_points)]
     t0 = time.time()
     omega_encoder = OmegaEncoder()
     omega_encoded_bits = omega_encoder.encode(random_ints, "naturalOnly")
     t1 = time.time()
-    print(f'Encoding took: {(t1 - t0):.2f} seconds for {len(random_ints)} numbers in {omega_encoded_bits.nbytes} bytes')
+    _log.debug("Encoding took: %.2f seconds for %s numbers in %s bytes", t1 - t0, len(random_ints), omega_encoded_bits.nbytes)
     decoded_nums = omega_encoder.decode(omega_encoded_bits, "naturalOnly")
-    print(f'Decoding took: {(time.time() - t1):.2f} seconds')
+    _log.debug("Decoding took: %.2f seconds", time.time() - t1)
     if decoded_nums == random_ints:
-        print('And the input is the same as the output')
+        _log.debug("And the input is the same as the output")
     else:
-        print('ERROR: Input and output not the same')
+        _log.error("ERROR: Input and output not the same")
 
     t2 = time.time()
     compressed_bytes = brotli.compress(omega_encoded_bits.tobytes())
-    print(f'Compressing took: {(time.time() - t2):.2f} seconds, to {len(compressed_bytes)} bytes')
+    _log.debug("Compressing took: %.2f seconds, to %s bytes", time.time() - t2, len(compressed_bytes))
     open('./omega_encoded_nums.bin', 'wb').write(omega_encoded_bits.tobytes())
 
 if __name__ == '__main__':
+    import logging as _logging
+    _logging.basicConfig(level=_logging.DEBUG)
+    _log = _logging.getLogger(__name__)
     # Usage python omega_encode.py [...list of ints to encode]
     if len(sys.argv[1:]) > 0:
         passed_ints = list(map(int, sys.argv[1:]))
         omega_encoder = OmegaEncoder()
         res = omega_encoder.encode(passed_ints, 'naturalOnly')
 
-        print(f'{res.nbytes} bytes needed to represent {len(passed_ints)} ints')
+        _log.debug("%s bytes needed to represent %s ints", res.nbytes, len(passed_ints))
         if len(res) < 50:
-            print(res)
-        print(omega_encoder.decode(res, 'naturalOnly'))
+            _log.debug("%s", res)
+        _log.debug("%s", omega_encoder.decode(res, 'naturalOnly'))
     else:
         stress_test_omega_encoding()
