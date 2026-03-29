@@ -52,11 +52,15 @@ if __name__ == "__main__":
 
     image_id = int(sys.argv[1]) if len(sys.argv) > 1 else get_image_id(client)
 
-    image_response = client.perform_request("GetScreenshot", {
-        "imageid": image_id,
-        "level": 14,
-        "withAnnotationForUser": SLIDESCORE_EMAIL
-    }, method="GET")
+    image_response = client.perform_request(
+        "GetScreenshot",
+        method="GET",
+        params={
+            "imageId": image_id,
+            "level": 14,
+            "withAnnotationForUser": SLIDESCORE_EMAIL,
+        },
+    )
     jpeg_bytes = image_response.content
     with open('screenshot.jpg', 'wb') as fh:
         fh.write(jpeg_bytes)

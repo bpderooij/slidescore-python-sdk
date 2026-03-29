@@ -49,7 +49,11 @@ if __name__ == "__main__":
                     "svid": id,
                     "data_converted": datetime.datetime.now().isoformat()
                 })
-                resp = client.perform_request("ConvertScoreValueToAnno2", {"scoreValueId": int(id), "metadata": metadata}, method="POST")
+                resp = client.perform_request(
+                    "ConvertScoreValueToAnno2",
+                    method="POST",
+                    params={"scoreValueId": int(id), "metadata": metadata},
+                )
                 if resp.status_code != 200:
                     result = {
                         "id": id,

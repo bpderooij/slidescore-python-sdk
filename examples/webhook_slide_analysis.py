@@ -30,7 +30,7 @@ def convert_2_anno2_uuid(items, client, metadata=''):
     # Convert to anno2 zip, upload, and return uploaded anno2 uuid
     local_anno2_path = create_tmp_file('', '.zip')
     client.convert_to_anno2(items, metadata, local_anno2_path)
-    response = client.perform_request("CreateOrphanAnno2", {}, method="POST").json()
+    response = client.perform_request("CreateOrphanAnno2", method="POST").json()
     assert response["success"] is True
 
     client.upload_using_token(local_anno2_path, response["uploadToken"])
@@ -119,15 +119,19 @@ def threshold_image(client, image_id: int, rois: list):
         if roi["corner"]["x"] is None or roi["corner"]["y"] is None:
             continue # Basic validation
     
-        image_response = client.perform_request("GetScreenshot", {
-            "imageid": image_id,
-            "x": roi["corner"]["x"],
-            "y": roi["corner"]["y"],
-            "width": roi["size"]["x"],
-            "height": roi["size"]["y"],
-            "level": 15,
-            "showScalebar": "false"
-        }, method="GET")
+        image_response = client.perform_request(
+            "GetScreenshot",
+            method="GET",
+            params={
+                "imageId": image_id,
+                "x": roi["corner"]["x"],
+                "y": roi["corner"]["y"],
+                "width": roi["size"]["x"],
+                "height": roi["size"]["y"],
+                "level": 15,
+                "showScalebar": "false",
+            },
+        )
         jpeg_bytes = image_response.content
         print("Retrieved image from server, performing analysis using OpenCV")
 
@@ -255,7 +259,7 @@ class ExampleAPIServer(BaseHTTPRequestHandler):
             ]), "utf-8"))
 
             # Give up token, cannot be used after this request
-            client.perform_request("GiveUpToken", {}, "POST")           
+            client.perform_request("GiveUpToken", method="POST")
 
         except Exception as e:
             print("Caught exception:", e)

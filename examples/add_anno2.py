@@ -27,7 +27,9 @@ def get_study_and_image(client: slidescore.APIClient):
     study_id = int(input('Which study number to use: '))
 
     # Verify it has the correct annotation question that we want to answer
-    study_questions = client.perform_request("Questions", {"studyId": study_id}, method="GET").json()
+    study_questions = client.perform_request(
+        "Questions", method="GET", params={"studyId": study_id}
+    ).json()
 
     has_correct_question = False
     for question in study_questions:

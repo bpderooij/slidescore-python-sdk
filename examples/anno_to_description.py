@@ -26,7 +26,15 @@ SLIDESCORE_API_KEY = os.getenv('SLIDESCORE_API_KEY') or input('What is your Slid
 SLIDESCORE_HOST = os.getenv('SLIDESCORE_HOST') or input('What is your Slidescore host: ') # https://slidescore.com/
 
 def update_desc(image_id, desc):
-     resp = client.perform_request("SetSlideDescription", {"imageId": image_id, 'studyId':studyid, "description": desc}, method="POST")
+     resp = client.perform_request(
+         "SetSlideDescription",
+         method="POST",
+         params={
+             "imageId": image_id,
+             "studyId": studyid,
+             "description": desc,
+         },
+     )
      resp.json()
 
 def convert_points(points):

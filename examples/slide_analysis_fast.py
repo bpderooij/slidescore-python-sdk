@@ -109,8 +109,12 @@ if __name__ == "__main__":
     study_id, image_id = get_study_and_image(client)
 
     # Fetch image metadata and authentication details for the high performance image server
-    img_metadata = client.perform_request("GetImageMetadata", {"imageid": image_id}, method="GET").json()["metadata"]
-    img_auth = client.perform_request("GetTileServer", {"imageid": image_id}, method="GET").json()
+    img_metadata = client.perform_request(
+        "GetImageMetadata", method="GET", params={"imageId": image_id}
+    ).json()["metadata"]
+    img_auth = client.perform_request(
+        "GetTileServer", method="GET", params={"imageId": image_id}
+    ).json()
 
     # Parse the img metadata and request tiles for a zoomed out level
     img_width, img_height = img_metadata["level0Width"], img_metadata["level0Height"]
@@ -183,12 +187,16 @@ if __name__ == "__main__":
     print("Created anno2 @", anno2_path, "with size:", int(os.path.getsize(anno2_path) / 1024), 'kiB')
 
     # Add Anno2 in the database, and receive an uploadtoken
-    anno2_resp = client.perform_request("CreateAnno2", {
-        "imageId": image_id,
-        "studyId": study_id,
-        "question": "Annotate shape",
-        "email": SLIDESCORE_EMAIL
-    }, method="POST").json()
+    anno2_resp = client.perform_request(
+        "CreateAnno2",
+        method="POST",
+        params={
+            "imageId": image_id,
+            "studyId": study_id,
+            "question": "Annotate shape",
+            "email": SLIDESCORE_EMAIL,
+        },
+    ).json()
     print("Created anno2 entry in SlideScore, uploading annotation")
 
     client.upload_using_token(anno2_path, anno2_resp["uploadToken"])

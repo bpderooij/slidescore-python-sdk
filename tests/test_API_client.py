@@ -6,10 +6,17 @@ import sys
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import slidescore
 
 # Either set the environment variables, or hardcode your settings below
 
+
+@pytest.mark.skipif(
+    not (os.getenv("SLIDESCORE_HOST") and os.getenv("SLIDESCORE_API_KEY")),
+    reason="SLIDESCORE_HOST and SLIDESCORE_API_KEY required",
+)
 def test_client_creation():
     SLIDESCORE_API_KEY = os.getenv('SLIDESCORE_API_KEY') # eyb..
     SLIDESCORE_HOST = os.getenv('SLIDESCORE_HOST') # https://slidescore.com/
@@ -21,7 +28,7 @@ def test_client_creation():
     SLIDESCORE_HOST = SLIDESCORE_HOST[:-1] if SLIDESCORE_HOST.endswith('/') else SLIDESCORE_HOST
 
     client = slidescore.APIClient(SLIDESCORE_HOST, SLIDESCORE_API_KEY)
-    response = client.perform_request('Studies', None, method="GET")
+    response = client.perform_request("Studies", method="GET")
     assert response.status_code == 200
 
 
@@ -49,7 +56,10 @@ def test_upload_ASAP_questions_map_joins_key_value():
 
 
 def test_get_image_server_url_builds_from_end_point():
-    def fake_get(url, verify=True, headers=None, data=None, stream=True, **kwargs):
+    captured: dict = {}
+
+    def fake_get(url, verify=True, headers=None, params=None, stream=True, **kwargs):
+        captured["params"] = params
         r = MagicMock()
         r.status_code = 200
         r.json.return_value = {"urlPart": "dz", "cookiePart": "c=1"}
@@ -58,7 +68,8 @@ def test_get_image_server_url_builds_from_end_point():
     client = slidescore.APIClient("https://host.example", "token")
     with patch("slidescore.slidescore.requests.get", side_effect=fake_get):
         tile_url, cookie = client.get_image_server_url(7)
-    assert tile_url == "https://host.example/i/7/dz/_files"
+    assert captured["params"] == {"imageId": 7}
+    assert tile_url == "https://host.example/i/7/dz/i_files"
     assert cookie == "c=1"
 
 

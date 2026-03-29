@@ -23,7 +23,13 @@ if __name__ == "__main__":
 
 
     for i in range(10,95):
-        print(client.perform_request("GenerateStudentAccount", {
-                 "username": "acc"+str(i)+"@v", #email-like identifier
-                 "classID": class_id
-                 }, method="POST").text)
+        print(
+            client.perform_request(
+                "GenerateStudentAccount",
+                method="POST",
+                params={
+                    "username": "acc" + str(i) + "@v",
+                    "classID": class_id,
+                },
+            ).text
+        )

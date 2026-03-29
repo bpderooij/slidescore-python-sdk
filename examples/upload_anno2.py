@@ -26,7 +26,9 @@ def get_study_and_image(client: slidescore.APIClient):
     study_id = int(input('Which study number to use: '))
 
     # Verify it has the correct annotation question that we want to answer
-    study_questions = client.perform_request("Questions", {"studyId": study_id}, method="GET").json()
+    study_questions = client.perform_request(
+        "Questions", method="GET", params={"studyId": study_id}
+    ).json()
 
     question_options = [q for q in study_questions if q["typeName"] == "AnnoShapes" or q["typeName"] == "AnnoPoints"]
     
@@ -82,12 +84,16 @@ if __name__ == "__main__":
     print("Starting upload anno2 @", local_anno2_path, "with size:", int(os.path.getsize(local_anno2_path) / 1024), 'kiB')
 
     # Create DB entry serverside
-    resp = client.perform_request("CreateAnno2", { 
-        "studyid": study_id,
-        "imageId": image_id,
-        "question": question_name,
-        "email": SLIDESCORE_EMAIL
-    }, method="POST").json()
+    resp = client.perform_request(
+        "CreateAnno2",
+        method="POST",
+        params={
+            "studyId": study_id,
+            "imageId": image_id,
+            "question": question_name,
+            "email": SLIDESCORE_EMAIL,
+        },
+    ).json()
 
     print("Created an anno2 DB entry, uploading...")
     # Actually upload the annotation

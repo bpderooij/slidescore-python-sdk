@@ -162,8 +162,12 @@ def stitch_tiles_to_mosaics(host, image_id, img_auth, level, start_col_i, end_co
 def handle_post(host: str, api_token: str, image_id: int, roi: list):
     client = slidescore.APIClient(host, api_token)
     # Fetch image metadata and authentication details for the high performance image server
-    img_metadata = client.perform_request("GetImageMetadata", {"imageid": image_id}, method="GET").json()["metadata"]
-    img_auth = client.perform_request("GetTileServer", {"imageid": image_id}, method="GET").json()
+    img_metadata = client.perform_request(
+        "GetImageMetadata", method="GET", params={"imageId": image_id}
+    ).json()["metadata"]
+    img_auth = client.perform_request(
+        "GetTileServer", method="GET", params={"imageId": image_id}
+    ).json()
 
     # Parse the img metadata and request tiles for a zoomed out level
     img_width, img_height = img_metadata["level0Width"], img_metadata["level0Height"]
@@ -251,7 +255,7 @@ def handle_post(host: str, api_token: str, image_id: int, roi: list):
 
     client.convert_to_anno2(slidescore_polygons, metadata, anno2_path)
     print("Created anno2 @", anno2_path, "with size:", int(os.path.getsize(anno2_path) / 1024), 'kiB')
-    response = client.perform_request("CreateOrphanAnno2", {}, method="POST").json()
+    response = client.perform_request("CreateOrphanAnno2", method="POST").json()
     assert response["success"] is True
 
     client.upload_using_token(anno2_path, response["uploadToken"])

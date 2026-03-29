@@ -56,7 +56,11 @@ You can use (limited) set of HTML tags in slide, case, study and module descript
 
 The SDK doesn't include methods for all possible calls, sometimes you need to make the API request yourself:
 
-    response=clientlocal.perform_request("UpdateSlideName", {"imageId":imageid, "newName":'renamedSlide'}, method="POST")
+    response = clientlocal.perform_request(
+        "UpdateSlideName",
+        method="POST",
+        data={"imageId": imageid, "newName": "renamedSlide"},
+    )
     rjson = response.json()
     if 'success' not in rjson or rjson['success'] != True:
         raise SlideScoreErrorException("Failed updating slide name: " + response.text);

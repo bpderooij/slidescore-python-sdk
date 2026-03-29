@@ -104,7 +104,16 @@ if __name__ == "__main__":
     image_id = images[0]["id"]
 
     # Extract pixel information by making a "screenshot" of the entire slide
-    image_response = client.perform_request("GetScreenshot", {"imageid": image_id, "level": 11}, method="GET")
+    image_response = client.perform_request(
+        "GetScreenshot",
+        method="GET",
+        params={
+            "imageId": image_id,
+            "withAnnotationForUser": SLIDESCORE_EMAIL,
+            "question": "Annotate shape",
+            "level": 11,
+        },
+    )
     jpeg_bytes = image_response.content
     print("Retrieved image from server, performing analysis using OpenCV")
 
@@ -118,21 +127,25 @@ if __name__ == "__main__":
     print("Performed local image analysis")
 
     # Convert OpenCV2 contour to AnnoShape Polygons format of SlideScore
-    img_metadata = client.perform_request("GetImageMetadata", {"imageid": image_id}, method="GET").json()["metadata"]
+    img_metadata = client.perform_request(
+        "GetImageMetadata", method="GET", params={"imageId": image_id}
+    ).json()["metadata"]
     orig_img_dims = (img_metadata["level0Width"], img_metadata["level0Height"])
     cur_img_dims = (img.shape[1], img.shape[0])
     polygons = convert_contours_2_polygons(contours, cur_img_dims, orig_img_dims)
     print("Converted image analysis results to SlideScore annotation")
 
     # Upload AnnoShape as answer to the question
-    answer = slidescore.SlideScoreResult({
-        "id": -1,
-        "imageID": image_id,
-        "imageName": "slide",
-        "user": SLIDESCORE_EMAIL,
-        "question": "Annotate shape",
-        "answer": json.dumps(polygons)
-    })
+    answer = slidescore.SlideScoreResult.from_api_response(
+        {
+            "id": -1,
+            "imageID": image_id,
+            "imageName": "slide",
+            "user": SLIDESCORE_EMAIL,
+            "question": "Annotate shape",
+            "answer": json.dumps(polygons),
+        }
+    )
     client.upload_results(study_id, [answer])
     print("Uploaded image annotation")
 

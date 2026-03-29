@@ -6,7 +6,8 @@ verifying they are saved and making sure invalid results raise an error.
 import sys
 import os
 from datetime import datetime
-import tempfile
+
+import pytest
 
 import slidescore
 from common_lib import create_study
@@ -14,35 +15,38 @@ from common_lib import create_study
 
 def create_answers(image_id: int, image_name: str, email: str):
     i = 1
-    # Add answer to the freetext question and the option question
-    freetext_answer = slidescore.SlideScoreResult({
-        "imageID": image_id,
-        "imageName": image_name,
-        "user": email,
-        "question": "Test question",
-        "answer": f"test answer {i}"
-    })
+    freetext_answer = slidescore.SlideScoreResult.from_api_response(
+        {
+            "imageID": image_id,
+            "imageName": image_name,
+            "user": email,
+            "question": "Test question",
+            "answer": f"test answer {i}",
+        }
+    )
 
-    option_answer = slidescore.SlideScoreResult({
-        "imageID": image_id,
-        "imageName": image_name,
-        "user": email,
-        "question": "Options question",
-        "answer": f"Option{(i % 3) + 1}"
-    })
-    answers = [freetext_answer, option_answer]
-    return answers
+    option_answer = slidescore.SlideScoreResult.from_api_response(
+        {
+            "imageID": image_id,
+            "imageName": image_name,
+            "user": email,
+            "question": "Options question",
+            "answer": f"Option{(i % 3) + 1}",
+        }
+    )
+    return [freetext_answer, option_answer]
 
 
+@pytest.mark.skipif(
+    not (os.getenv("SLIDESCORE_HOST") and os.getenv("SLIDESCORE_API_KEY")),
+    reason="SLIDESCORE_HOST and SLIDESCORE_API_KEY required",
+)
 def test_upload_asap():
-    SLIDESCORE_API_KEY = os.getenv('SLIDESCORE_API_KEY') # eyb..
-    SLIDESCORE_HOST = os.getenv('SLIDESCORE_HOST') # https://slidescore.com/
-    USER_EMAIL = os.getenv('SLIDESCORE_EMAIL') or "pytest@example.com"
+    SLIDESCORE_API_KEY = os.getenv("SLIDESCORE_API_KEY")
+    SLIDESCORE_HOST = os.getenv("SLIDESCORE_HOST")
+    USER_EMAIL = os.getenv("SLIDESCORE_EMAIL") or "pytest@example.com"
 
-    # Make sure we got a HOST and KEY
-    assert SLIDESCORE_HOST
-    assert SLIDESCORE_API_KEY
-    assert USER_EMAIL
+    assert SLIDESCORE_HOST and SLIDESCORE_API_KEY and USER_EMAIL
     SLIDESCORE_HOST = SLIDESCORE_HOST[:-1] if SLIDESCORE_HOST.endswith('/') else SLIDESCORE_HOST
 
     client = slidescore.APIClient(SLIDESCORE_HOST, SLIDESCORE_API_KEY)
@@ -58,24 +62,24 @@ def test_upload_asap():
     <Annotation Name="Annotation 0" Type="Polygon" PartOfGroup="red" Color="#e6194b"><Coordinates><Coordinate Order="0" X="40444" Y="37114" /><Coordinate Order="1" X="40444" Y="37104" /><Coordinate Order="2" X="40454" Y="37104" /><Coordinate Order="3" X="40454" Y="37095" /><Coordinate Order="4" X="40543" Y="37095" /><Coordinate Order="5" X="40543" Y="37085" /><Coordinate Order="6" X="40563" Y="37085" /><Coordinate Order="7" X="40563" Y="37075" /><Coordinate Order="8" X="40573" Y="37075" /><Coordinate Order="9" X="40573" Y="37065" /><Coordinate Order="10" X="40583" Y="37065" /><Coordinate Order="11" X="40583" Y="37055" /><Coordinate Order="12" X="40602" Y="37055" /><Coordinate Order="13" X="40602" Y="37045" /><Coordinate Order="14" X="40632" Y="37045" /><Coordinate Order="15" X="40632" Y="37035" /></Coordinates></Annotation>
     </Annotations></ASAP_Annotations>"""
     
-    # Upload the answers
-    result = client.perform_request("UploadASAPAnnotations", {
-        
-                 "imageId": image_id,
-                 "user": USER_EMAIL,
-                 "asapAnnotation": asap,
-                 "questionsMap": "#e6194b;Test anno"
-                 }, method="POST")
+    result = client.perform_request(
+        "UploadASAPAnnotations",
+        method="POST",
+        data={
+            "imageId": image_id,
+            "user": USER_EMAIL,
+            "annotationName": "Annotation",
+            "asapAnnotation": asap,
+            "questionsMap": "#e6194b;Test anno",
+        },
+    )
 
     assert result
     assert result.text[0] != '"'
-    rjson=result.json()
+    rjson = result.json()
     assert rjson["success"]
 
-
-    # Now retrieve them from the API
-    retrieved_results = client.get_results(study_id)
-
+    client.get_results(study_id)
 
 
 if __name__ == "__main__":

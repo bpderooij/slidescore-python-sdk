@@ -51,7 +51,9 @@ def rois_to_polygons(rois: list):
 
 def get_level(client, image_id, width, height, desired_size = 1024):
     # Calculate the DeepZoom level 
-    img_metadata = client.perform_request("GetImageMetadata", {"imageid": image_id}, method="GET").json()["metadata"]
+    img_metadata = client.perform_request(
+        "GetImageMetadata", method="GET", params={"imageId": image_id}
+    ).json()["metadata"]
     img_width, img_height = img_metadata["level0Width"], img_metadata["level0Height"]
     max_level = math.ceil(math.log2(max(img_width, img_height)))
     max_level_api = max_level + 2
@@ -123,15 +125,19 @@ def segment_image(client, image_id: int, rois: list, positive_points: list, nega
     
     for roi in rois:
         dzi_level = get_level(client, image_id, roi["size"]["x"], roi["size"]["y"], 1500)
-        image_response = client.perform_request("GetScreenshot", {
-            "imageid": image_id,
-            "x": roi["corner"]["x"],
-            "y": roi["corner"]["y"],
-            "width": roi["size"]["x"],
-            "height": roi["size"]["y"],
-            "level": dzi_level,
-            "showScalebar": "false"
-        }, method="GET")
+        image_response = client.perform_request(
+            "GetScreenshot",
+            method="GET",
+            params={
+                "imageId": image_id,
+                "x": roi["corner"]["x"],
+                "y": roi["corner"]["y"],
+                "width": roi["size"]["x"],
+                "height": roi["size"]["y"],
+                "level": dzi_level,
+                "showScalebar": "false",
+            },
+        )
         jpeg_bytes = image_response.content
         print("Retrieved image from server, performing analysis using FastSAM")
 
@@ -243,7 +249,7 @@ def request_handler(request):
     print('Succesfully contoured image', request)
 
     # Give up token, cannot be used after this request
-    client.perform_request("GiveUpToken", {}, "POST")
+    client.perform_request("GiveUpToken", method="POST")
 
     # Return an JSON array with a single result, A list of polygons surrounding the dark parts of the ROI.
     return([{

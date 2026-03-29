@@ -30,7 +30,9 @@ def get_score_value_id(client: slidescore.APIClient):
     study_id = int(input('Which study number to use: '))
 
     # Verify it has the correct annotation question that we want to answer
-    study_questions = client.perform_request("Questions", {"studyId": study_id}, method="GET").json()
+    study_questions = client.perform_request(
+        "Questions", method="GET", params={"studyId": study_id}
+    ).json()
     anno_shape_questions = [q for q in study_questions if q["typeName"] == "AnnoShapes" or q["typeName"] == "AnnoPoints"]
         
     if len(anno_shape_questions) == 0:
@@ -77,7 +79,11 @@ if __name__ == "__main__":
 
     score_value_id = int(sys.argv[1]) if len(sys.argv) > 1 else get_score_value_id(client)
     metadata = '{ "description": "Hello World" }'
-    resp = client.perform_request("ConvertScoreValueToAnno2", {"scoreValueId": score_value_id, "metadata": metadata}, method="POST")
+    resp = client.perform_request(
+        "ConvertScoreValueToAnno2",
+        method="POST",
+        params={"scoreValueId": score_value_id, "metadata": metadata},
+    )
     print("Conversion response: ", resp.text)
 
     print(f'Done')

@@ -187,22 +187,31 @@ def test_anno2():
         # Upload the first 2 anno2's
         for anno2_fn, question_name in zip(anno2_fns, question_names):
             # Notify the server we will upload an anno2
-            resp = client.perform_request("CreateAnno2", { 
-                "studyid": study_id,
-                "imageId": image_id,
-                "question": question_name,
-                "email": USER_EMAIL
-            }, method="POST").json()
+            resp = client.perform_request(
+                "CreateAnno2",
+                method="POST",
+                params={
+                    "studyId": study_id,
+                    "imageId": image_id,
+                    "question": question_name,
+                    "email": USER_EMAIL,
+                },
+            ).json()
             assert resp["uploadToken"]
             # Actually upload the annotation
             client.upload_using_token(anno2_fn, resp["uploadToken"])
         
         # Now check if we can create a screenshot
-        image_response = client.perform_request("GetScreenshot", {
-            "imageid": image_id,
-            "level": 14,
-            "withAnnotationForUser": USER_EMAIL
-        }, method="GET")
+        image_response = client.perform_request(
+            "GetScreenshot",
+            method="GET",
+            params={
+                "imageId": image_id,
+                "level": 14,
+                "withAnnotationForUser": USER_EMAIL,
+                "question": question_names[0],
+            },
+        )
         jpeg_bytes = image_response.content
         assert len(jpeg_bytes) > 1024
 

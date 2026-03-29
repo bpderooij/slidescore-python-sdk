@@ -43,14 +43,18 @@ def test_high_perf_img_server():
     study_id, image_id, image_name = create_study(client, study_name, USER_EMAIL)
 
     # Fetch image metadata and authentication details for the high performance image server
-    img_metadata = client.perform_request("GetImageMetadata", {"imageid": image_id}, method="GET").json()["metadata"]
+    img_metadata = client.perform_request(
+        "GetImageMetadata", method="GET", params={"imageId": image_id}
+    ).json()["metadata"]
     assert 'level0TileWidth' in img_metadata
     assert 'level0TileHeight' in img_metadata
     assert 'mppX' in img_metadata
     assert 'levelCount' in img_metadata
     assert 'levelHeights' in img_metadata
 
-    img_auth = client.perform_request("GetTileServer", {"imageid": image_id}, method="GET").json()
+    img_auth = client.perform_request(
+        "GetTileServer", method="GET", params={"imageId": image_id}
+    ).json()
     assert 'cookiePart' in img_auth
     assert 'urlPart' in img_auth
     assert 'expiresOn' in img_auth
@@ -93,10 +97,11 @@ def test_high_perf_img_server():
     client.update_slide_path(image_id, path.replace("images/","").replace("images\\","").replace("\\","/"))
 
     localfile = sys.path[0].replace("\\","/")+ '/test-image.TiFF'
-    ret = client.perform_request("GenerateSlideFileURL", {
-         "filename": localfile,
-         "user": USER_EMAIL
-         }, method="POST")
+    ret = client.perform_request(
+        "GenerateSlideFileURL",
+        method="POST",
+        params={"filename": localfile, "user": USER_EMAIL},
+    )
          
     assert ret
     rjson = ret.json()
@@ -109,10 +114,11 @@ def test_high_perf_img_server():
     assert req.content
     assert req.text.find("openseadragon") != -1
     
-    ret = client.perform_request("GenerateSlideFileURL", {
-         "filename": localfile,
-         "user": None
-         }, method="POST")
+    ret = client.perform_request(
+        "GenerateSlideFileURL",
+        method="POST",
+        params={"filename": localfile, "user": None},
+    )
     
     assert ret
     rjson = ret.json()
