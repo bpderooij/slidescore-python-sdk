@@ -11,11 +11,6 @@ class PolygonContainer:
     Every polygon is stored in a single list, and their index is stored in all tiles that might contain them
     When saving to disk, use the encode_polygons method to compress the stored polygons into a space-effecient format"""
 
-    allTiles = {}
-    bigTiles = {}
-    polygons: Polygons = None
-    tile_size = 256
-    
     def __init__(self, tile_size: int, polygons: Polygons):
         self.allTiles = {}
         self.bigTiles = {}
