@@ -11,11 +11,6 @@ class PolygonContainer:
     When saving to disk, use the encode_polygons method to compress the stored polygons into a space-effecient format
     """
 
-    allTiles = {}
-    bigTiles = {}
-    polygons: Polygons = None
-    tile_size = 256
-
     def __init__(self, tile_size: int, polygons: Polygons):
         self.allTiles = {}
         self.bigTiles = {}

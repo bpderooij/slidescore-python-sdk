@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 import tempfile
 
+import pytest
 import slidescore
 from common_lib import create_study
 
@@ -112,6 +113,18 @@ def test_slidescore_result_plain_xy_json_answer_sets_points():
         "answer": '[{"x": 10, "y": 20}]',
     })
     assert r.points[0]["x"] == 10
+
+
+def test_slidescore_result_malformed_json_answer_raises():
+    with pytest.raises(ValueError, match="not valid JSON"):
+        slidescore.SlideScoreResult({
+            "id": 1,
+            "imageID": 10,
+            "imageName": "slide",
+            "user": "u",
+            "question": "q",
+            "answer": '[{not valid json',
+        })
 
 
 if __name__ == "__main__":

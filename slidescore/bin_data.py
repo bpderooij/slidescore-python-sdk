@@ -2,10 +2,9 @@
 import argparse
 import gzip
 import json
-import sys
 
 from .lib.Encoder import Encoder
-from .lib.utils import log, read_geo_json, read_slidescore_json, read_tsv
+from .lib.utils import get_logger, read_geo_json, read_slidescore_json, read_tsv
 
 DESC = """
 This program converts a items TSV file (or slidescore_anno1.json) of either points in a mask, polygons or a heatmap, into a binned format for fast lookup.
@@ -50,10 +49,11 @@ def main(argv=None):
 
     # Parse the arguments
     args = parser.parse_args(argv)
+    logger = get_logger(verbosity=0)
     raw_items_path = args.items_path
     binned_items_path: str = args.output
 
-    log("Reading data into memory")
+    logger.info("Reading data into memory")
 
     # Parse the input items
     if raw_items_path.endswith(".tsv"):
@@ -69,24 +69,23 @@ def main(argv=None):
             data = json.load(fh)
             items = read_slidescore_json(data)
     else:
-        sys.exit("Please provide a .tsv/.geojson file")
+        raise ValueError("Please provide a .tsv/.geojson/.json file")
 
-    log("Loaded data into memory")
+    logger.info("Loaded data into memory")
 
     encoder = Encoder(items, big_polygon_size_cutoff=100 * 100)
     encoder.generate_tile_data(256)
-    log("Binned items into 256x256 tiles")
+    logger.info("Binned items into 256x256 tiles")
 
     encoder.populate_lookup_tables()
-    log("Generated lookup tables")
+    logger.info("Generated lookup tables")
     if args.metadata:
         with open(args.metadata) as fh:
             metadata = json.load(fh)
             encoder.add_metadata(metadata)
 
     encoder.dump_to_file(binned_items_path)
-    log("Dumped to file")
-
+    logger.info("Dumped to file")
 
 if __name__ == "__main__":
     main()

@@ -63,8 +63,11 @@ class SlideScoreResult:
                         self.annotations = annos
                     else:
                         self.points = annos
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"SlideScoreResult answer looks like JSON (starts with '[{{') but is not valid "
+                    f"JSON (result id={self.id}, image_id={self.image_id})"
+                ) from exc
 
     def toRow(self):
         """

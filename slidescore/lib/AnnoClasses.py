@@ -4,8 +4,7 @@ from collections.abc import Sequence
 
 from slidescore.lib.simplify import simplifyPolygons
 
-_logger = logging.getLogger(__name__)
-# import numpy as np
+logger = logging.getLogger(__name__)
 
 
 class Points(Sequence):
@@ -13,10 +12,8 @@ class Points(Sequence):
 
     Can be indexed to a get a tuple of the n'th point."""
 
-    flattened_points = None
-    name = "points"
-
     def __init__(self, init_points: list = None):
+        self.name = "points"
         self.flattened_points = array.array("I")
         self.metadata: dict[str, dict] = {}
         super().__init__()
@@ -42,9 +39,8 @@ class Polygons(Sequence):
 
     Internally uses EfficientArray to store the positive vertices of each polygon"""
 
-    name = "polygons"
-
     def __init__(self):
+        self.name = "polygons"
         self.polygons = EfficientArray()
         self.simplified_polygons = []
         self.negative_polygons_i = {}
@@ -226,7 +222,7 @@ class EfficientArray:
     def getValues(self, i: int):
         """Retrieve an entry from the values array"""
         if i >= self.curOffsetIndex:
-            _logger.error("Trying to get i %s but max is %s", i, self.curOffsetIndex)
+            logger.error("Trying to get i %s but max is %s", i, self.curOffsetIndex)
             return None
         start = self.offsetArray[i]
         end = self.offsetArray[i + 1]
