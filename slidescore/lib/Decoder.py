@@ -1,12 +1,12 @@
 import array
 import json
+import logging
 import os
 import tarfile
 import typing
 import zipfile
-from typing import List
-import zipfile
 from datetime import datetime, timezone
+from typing import List
 from packaging import version
 
 from bitarray import bitarray
@@ -17,10 +17,9 @@ import png
 from slidescore.lib.image_utils import encode_png
 from slidescore.lib.omega_encoder import OmegaEncoder
 
-from .utils import get_logger
 from .AnnoClasses import Polygons, Points, Heatmap, Items
 
-logger = get_logger(0)
+logger = logging.getLogger(__name__)
 
 class Decoder():
     """Encompassing class to decode Anno2"""
@@ -34,12 +33,15 @@ class Decoder():
     def __init__(self, anno2: zipfile.ZipFile, verbosity = 0) -> None:
         """Initialize decoder with a Anno2 zipfile, checking if we can convert it
         """
-        global logger
-        logger = get_logger(verbosity)
 
         self.anno2 = anno2
         self._check_if_compatible_anno2()
-        logger.notice(f"Loaded Anno2 (v{self.anno2_version}, type={self.system_metadata['type']}, numItems={self.system_metadata['numItems']})")
+        logger.info(
+            "Loaded Anno2 (v%s, type=%s, numItems=%s)",
+            self.anno2_version,
+            self.system_metadata["type"],
+            self.system_metadata["numItems"],
+        )
 
     def _check_if_compatible_anno2(self):
         """Also loads anno2_version & system_metadata"""
@@ -84,7 +86,10 @@ class Decoder():
         
         if type(self.system_metadata['numItems']) is int:
             if self.system_metadata['numItems'] == len(self.items):
-                logger.notice(f'Decoded anno2 had the correct number of items ({len(self.items)})')
+                logger.info(
+                    'Decoded anno2 had the correct number of items (%s)',
+                    len(self.items),
+                )
             else:
                 logger.warning(f"Decoded anno2 had an unexpected number of items (expected {self.system_metadata['numItems']} != got {len(self.items)})")
         else:
@@ -186,7 +191,6 @@ class Decoder():
                 for j in range(len(polygon['positiveVertices'])):
                     x, y = polygon['positiveVertices'][j]
                     is_last = j == len(polygon['positiveVertices']) - 1
-                    # logger.debug(f'{x=} {y=} {is_last=}')
                     fh.write(f'{x}\t{y}' + ('\t' if not is_last else ''))
                 fh.write('\n')
         elif type(self.items) is Points:
@@ -478,7 +482,7 @@ class Decoder():
             tile_x += x_jump
             tile_y += y_jump
 
-            # logger.debug(f'{len(num_points_in_tile)=}, {len(x_jumps)=} {i=}')
+            # _log.debug(f'{len(num_points_in_tile)=}, {len(x_jumps)=} {i=}')
             num_points_in_this_tile = num_points_in_tile[i]
             for _ in range(num_points_in_this_tile):
                 if remainder_i // 2 >= num_points:

@@ -9,10 +9,7 @@ Be warned that this is not guaranteed, and the output file format should be chec
 Author: Bart.
 """
 
-import sys
 import argparse
-import json
-import gzip
 import zipfile
 
 from .lib.Decoder import Decoder
@@ -35,9 +32,9 @@ def main(argv=None):
 
     # Parse the arguments
     args = parser.parse_args(argv)
+    logger = get_logger(verbosity=args.verbose)
     anno2_path: str = args.anno2_path
     output_path: str = args.output
-    logger = get_logger(args.verbose)
 
     logger.debug(f'Exporting anno2 at {anno2_path}, ')
     
@@ -46,11 +43,11 @@ def main(argv=None):
     anno2 = zipfile.ZipFile(anno2_path)
     decoder = Decoder(anno2, args.verbose)
     decoder.decode()
-    logger.notice('Decoded items succesfully, saving to disk')
+    logger.info('Decoded items succesfully, saving to disk')
     decoder.dump_to_file(output_path)
     if args.metadata_output:
         decoder.dump_user_metadata_to_file(args.metadata_output)
-    logger.notice('Finished saving to disk')
+    logger.info('Finished saving to disk')
 
 if __name__ == "__main__":
     main()

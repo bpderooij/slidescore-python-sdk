@@ -460,37 +460,19 @@ def msgpack_encoder(obj):
 
 # miscellaneous
 
-_NOTICE_LEVEL = 25  # between INFO (20) and WARNING (30)
 
-def get_logger(verbosity: int) -> logging.Logger:
-    """Configure and return a logger with the given verbosity level.
+def get_logger(verbosity: int = 0) -> logging.Logger:
+    """Configure root logging (when unconfigured) and return the utils logger.
 
-    Registers a custom NOTICE level (25, between INFO and WARNING) on first
-    call. This is intentionally deferred so importing the library has no side
-    effects on the logging system.
+    Uses :func:`logging.basicConfig`, which has no effect if the root logger
+    already has handlers.
     """
-    if not hasattr(logging.Logger, "notice"):
-        logging.addLevelName(_NOTICE_LEVEL, "NOTICE")
-
-        def _notice(self, message, *args, **kwargs):
-            if self.isEnabledFor(_NOTICE_LEVEL):
-                self._log(_NOTICE_LEVEL, message, args, **kwargs)
-
-        logging.Logger.notice = _notice  # type: ignore[attr-defined]
-
-    if verbosity == 0:
-        level = _NOTICE_LEVEL
-    elif verbosity == 1:
-        level = logging.INFO
-    else:
-        level = logging.DEBUG
-
+    level = logging.DEBUG if verbosity >= 2 else logging.INFO
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
     )
-
     logger = logging.getLogger(__name__)
-    logger.level = level
+    logger.setLevel(level)
     return logger
