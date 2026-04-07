@@ -2,9 +2,10 @@
 import argparse
 import gzip
 import json
+import logging
 
 from .lib.Encoder import Encoder
-from .lib.utils import get_logger, read_geo_json, read_slidescore_json, read_tsv
+from .lib.utils import read_geo_json, read_slidescore_json, read_tsv
 
 DESC = """
 This program converts a items TSV file (or slidescore_anno1.json) of either points in a mask, polygons or a heatmap, into a binned format for fast lookup.
@@ -49,7 +50,12 @@ def main(argv=None):
 
     # Parse the arguments
     args = parser.parse_args(argv)
-    logger = get_logger(verbosity=0)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logger = logging.getLogger(__name__)
     raw_items_path = args.items_path
     binned_items_path: str = args.output
 
