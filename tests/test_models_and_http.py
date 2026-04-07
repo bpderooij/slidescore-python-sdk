@@ -107,7 +107,7 @@ def test_get_images_uses_study_id_casing() -> None:
         return r
 
     client = slidescore.APIClient("https://example.com", "token")
-    with patch("slidescore.slidescore.requests.get", side_effect=fake_get):
+    with patch("slidescore.client.requests.get", side_effect=fake_get):
         client.get_images(7)
     assert captured["params"] == {"studyId": 7}
 
@@ -124,7 +124,7 @@ def test_get_results_uses_swagger_query_names() -> None:
         return r
 
     client = slidescore.APIClient("https://example.com", "token")
-    with patch("slidescore.slidescore.requests.get", side_effect=fake_get):
+    with patch("slidescore.client.requests.get", side_effect=fake_get):
         client.get_results(1, question="Q", email="e", image_id=2, case_id=3)
     assert captured["params"] == {
         "studyId": 1,
@@ -148,7 +148,7 @@ def test_upload_asap_posts_image_id_key() -> None:
         return r
 
     client = slidescore.APIClient("https://example.com", "token")
-    with patch("slidescore.slidescore.requests.post", side_effect=fake_post):
+    with patch("slidescore.client.requests.post", side_effect=fake_post):
         client.upload_ASAP(
             42,
             "user",
@@ -263,7 +263,7 @@ def test_upload_results_posts_form_body_with_discarded_header_line() -> None:
         }
     )
     client = slidescore.APIClient("https://example.com", "token")
-    with patch("slidescore.slidescore.requests.post", side_effect=fake_post):
+    with patch("slidescore.client.requests.post", side_effect=fake_post):
         client.upload_results(3, [a])
     assert posted["data"]["studyId"] == 3
     results = str(posted["data"]["results"])
@@ -296,7 +296,7 @@ def test_upload_results_joins_multiple_rows_after_header_line() -> None:
         answer="y",
     )
     client = slidescore.APIClient("https://example.com", "token")
-    with patch("slidescore.slidescore.requests.post", side_effect=fake_post):
+    with patch("slidescore.client.requests.post", side_effect=fake_post):
         client.upload_results(9, [r1, r2])
     body = posted["data"]["results"]
     assert body.count("\n") == 2
