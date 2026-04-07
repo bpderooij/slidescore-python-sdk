@@ -1,3 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "slidescore-sdk"
+version = "1.5.3"
+description = "SDK for using the API of Slide Score"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Slide Score B.V.", email = "info@slidescore.com" }]
+keywords = ["slidescore", "slide score", "sdk", "api"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "requests",
+    "tuspy",
+    "bitarray>=2.7,<3",
+    "Brotli>=1.0.0",
+    "msgpack>=1.0.0",
+    "pypng==0.20220715.0",
+    "packaging>=20.0",
+]
+
+[project.optional-dependencies]
+numpy = ["numpy>=1.20"]
+cli = []
+
+[dependency-groups]
+dev = ["pytest", "ruff", "black"]
+
+[project.urls]
+Homepage = "https://github.com/SlideScore/SlideScore-python-sdk"
+
+[project.scripts]
+slidescore-encode = "slidescore.bin_data:main"
+slidescore-decode = "slidescore.export_data:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["slidescore"]
+
 [tool.ruff]
 line-length = 88
 
@@ -7,3 +54,6 @@ ignore = ["E501"]
 
 [tool.black]
 line-length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
