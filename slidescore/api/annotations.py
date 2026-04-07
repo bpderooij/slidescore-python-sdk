@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from ..lib.AnnoClasses import Heatmap, Points, Polygons
 from ..lib.Encoder import Encoder
-from ..lib.utils import read_slidescore_json
+from ..parsers.slidescore_json import read_slidescore_json
 from ..types import Anno2ConvertInput, Anno2OptionalId, JSONObject, JSONValue
 
 if TYPE_CHECKING:

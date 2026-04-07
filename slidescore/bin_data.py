@@ -5,7 +5,9 @@ import json
 import logging
 
 from .lib.Encoder import Encoder
-from .lib.utils import read_geo_json, read_slidescore_json, read_tsv
+from .parsers.geojson import read_geo_json
+from .parsers.slidescore_json import read_slidescore_json
+from .parsers.tsv import read_tsv
 
 DESC = """
 This program converts a items TSV file (or slidescore_anno1.json) of either points in a mask, polygons or a heatmap, into a binned format for fast lookup.
