@@ -104,7 +104,7 @@ def gen_chunks(flat_list: list, chunk_size: int):
 
 
 def simplifyPolygons(polygons_arr, tolerance=1.0):
-    from .AnnoClasses import EfficientArray
+    from .containers import EfficientArray
 
     simp_polygons_arr = EfficientArray()
     for polygon_i in range(len(polygons_arr)):
@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
     _logging.basicConfig(level=_logging.DEBUG)
     _log = _logging.getLogger(__name__)
-    from .AnnoClasses import Polygons
+    from .containers import Polygons
 
     _log.debug("Testing simplify algorithm")
     almost_triangle = [0, 0, 100, 100, 105, 95, 200, 0]

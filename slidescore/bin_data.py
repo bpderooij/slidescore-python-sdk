@@ -4,7 +4,7 @@ import gzip
 import json
 import logging
 
-from .lib.Encoder import Encoder
+from .anno2._encoder import Encoder
 from .parsers.geojson import read_geo_json
 from .parsers.slidescore_json import read_slidescore_json
 from .parsers.tsv import read_tsv

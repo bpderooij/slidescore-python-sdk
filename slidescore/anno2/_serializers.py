@@ -1,14 +1,8 @@
 import array
 import logging
 
-from .AnnoClasses import EfficientArray
-from .PolygonContainer import PolygonContainer
-
-# Backward-compatible re-exports — parsers have moved to slidescore/parsers/
-from ..parsers.geojson import extract_geojson, read_geo_json
-from ..parsers.heatmap_tsv import read_tsv_binary_heatmap, read_tsv_heatmap
-from ..parsers.slidescore_json import read_slidescore_json
-from ..parsers.tsv import read_tsv, read_tsv_points, read_tsv_polygons
+from .containers import EfficientArray
+from ._polygon_container import PolygonContainer
 
 _logger = logging.getLogger(__name__)
 
@@ -66,20 +60,3 @@ def msgpack_encoder(obj):
 
     if isinstance(obj, array.array):
         return encode_typed_arr(obj)
-
-
-def get_logger(verbosity: int = 0) -> logging.Logger:
-    """Configure root logging (when unconfigured) and return the utils logger.
-
-    Uses :func:`logging.basicConfig`, which has no effect if the root logger
-    already has handlers.
-    """
-    level = logging.DEBUG if verbosity >= 2 else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    logger = logging.getLogger(__name__)
-    logger.setLevel(level)
-    return logger

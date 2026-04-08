@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..lib.AnnoClasses import Heatmap
+from ..anno2.containers import Heatmap
 
 
 def read_tsv_heatmap(path: str) -> Heatmap:

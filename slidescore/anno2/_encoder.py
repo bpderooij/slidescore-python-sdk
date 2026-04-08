@@ -9,10 +9,10 @@ import zipfile
 import brotli
 import msgpack
 
-from .AnnoClasses import Heatmap, Item, Items, Points, Polygons
-from .image_utils import encode_png, get_png_bytes, lookup_table_2_png
-from .PolygonContainer import PolygonContainer
-from .utils import msgpack_encoder
+from .containers import Heatmap, Item, Items, Points, Polygons
+from ._image_utils import encode_png, get_png_bytes, lookup_table_2_png
+from ._polygon_container import PolygonContainer
+from ._serializers import msgpack_encoder
 
 _logger = logging.getLogger(__name__)
 

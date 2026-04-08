@@ -4,8 +4,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from ..lib.AnnoClasses import Heatmap, Points, Polygons
-from ..lib.Encoder import Encoder
+from ..anno2 import encode as anno2_encode
+from ..anno2.containers import Heatmap, Points, Polygons
 from ..parsers.slidescore_json import read_slidescore_json
 from ..types import Anno2ConvertInput, Anno2OptionalId, JSONObject, JSONValue
 
@@ -133,6 +133,10 @@ def convert_to_anno2(
 
     Accepts pre-loaded ``Points``, ``Polygons``, or ``Heatmap`` objects, or a
     raw list of SlideScore JSON dicts (brush/polygon/heatmap entries).
+
+    .. note::
+        This is a thin wrapper around :func:`slidescore.anno2.encode`.
+        The *client* parameter is unused — encoding is purely local.
     """
     items_encoder: Points | Polygons | Heatmap
     if isinstance(items, (Points, Polygons, Heatmap)):
@@ -140,11 +144,4 @@ def convert_to_anno2(
     else:
         items_encoder = read_slidescore_json(items)
 
-    encoder = Encoder(items_encoder, big_polygon_size_cutoff=100 * 100)
-    encoder.generate_tile_data(256)
-    encoder.populate_lookup_tables()
-
-    if metadata:
-        encoder.add_metadata(metadata)
-
-    encoder.dump_to_file(str(Path(output_path)))
+    anno2_encode(items_encoder, output_path, metadata=metadata)

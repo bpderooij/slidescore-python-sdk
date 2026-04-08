@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
-from ..lib.AnnoClasses import Points, Polygons
+from ..anno2.containers import Points, Polygons
 
 _logger = logging.getLogger(__name__)
 

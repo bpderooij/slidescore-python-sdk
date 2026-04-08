@@ -1,7 +1,7 @@
 import array
 
-from .AnnoClasses import Polygons
-from .polygon_encoder import polygons_2_bytes
+from .containers import Polygons
+from ._polygon_codec import polygons_2_bytes
 
 
 class PolygonContainer:

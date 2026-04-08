@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from ..lib.AnnoClasses import Heatmap, Points, Polygons
+from ..anno2.containers import Heatmap, Points, Polygons
 
 
 def read_slidescore_json(data) -> Points | Polygons | Heatmap:

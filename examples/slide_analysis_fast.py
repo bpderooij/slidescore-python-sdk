@@ -18,7 +18,7 @@ import json
 import math
 
 import slidescore
-import slidescore.lib.utils
+import slidescore.parsers.slidescore_json
 import requests
 
 import cv2 # $ pip install opencv-python
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     # The following call converts the python SlideScore annotations into a high performance, but
     # low size binary format.
     if annotation_type == 'points':
-        all_annotations = slidescore.lib.utils.read_slidescore_json(all_annotations)
+        all_annotations = slidescore.parsers.slidescore_json.read_slidescore_json(all_annotations)
         all_annotations.name = 'mask'
     client.convert_to_anno2(all_annotations, metadata, anno2_path)
     print("Created anno2 @", anno2_path, "with size:", int(os.path.getsize(anno2_path) / 1024), 'kiB')

@@ -2,8 +2,8 @@ import array
 import math
 from io import BufferedWriter, BytesIO
 
-from .AnnoClasses import EfficientArray, Polygons
-from .omega_encoder import OmegaEncoder
+from .containers import EfficientArray, Polygons
+from ._omega_codec import OmegaEncoder
 
 """
 For storing a polygon (or multiple)

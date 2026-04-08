@@ -12,8 +12,8 @@ from common_lib import create_study
 
 import slidescore
 import slidescore.bin_data
-from slidescore.lib.AnnoClasses import Heatmap, Points, Polygons
-from slidescore.lib.Encoder import Encoder
+from slidescore.anno2.containers import Heatmap, Points, Polygons
+from slidescore.anno2._encoder import Encoder
 
 
 def gen_mask_tsv(size, x_offset=0, y_offset=0):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .lib.AnnoClasses import Heatmap, Points, Polygons
+from .anno2.containers import Heatmap, Points, Polygons
 
 # JSON values as returned by :meth:`requests.Response.json` / :func:`json.loads`.
 type JSONValue = str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]

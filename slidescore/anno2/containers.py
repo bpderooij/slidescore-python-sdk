@@ -2,7 +2,7 @@ import array
 import logging
 from collections.abc import Sequence
 
-from slidescore.lib.simplify import simplifyPolygons
+from slidescore.anno2._simplify import simplifyPolygons
 
 logger = logging.getLogger(__name__)
 

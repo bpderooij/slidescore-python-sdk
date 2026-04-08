@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..lib.AnnoClasses import Heatmap, Points, Polygons
+from ..anno2.containers import Heatmap, Points, Polygons
 from .heatmap_tsv import read_tsv_binary_heatmap, read_tsv_heatmap
 
 

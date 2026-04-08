@@ -1,9 +1,9 @@
 
 import argparse
+import logging
 import zipfile
 
-from .lib.Decoder import Decoder
-from .lib.utils import get_logger
+from .anno2._decoder import Decoder
 
 DESC = """
 This program converts the Anno2 binned file to a common data format, like TSV, GeoJSON, or PNG.
@@ -49,7 +49,13 @@ def main(argv=None):
 
     # Parse the arguments
     args = parser.parse_args(argv)
-    logger = get_logger(verbosity=args.verbose)
+    level = logging.DEBUG if args.verbose >= 2 else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logger = logging.getLogger(__name__)
     anno2_path: str = args.anno2_path
     output_path: str = args.output
 

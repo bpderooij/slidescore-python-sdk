@@ -12,10 +12,10 @@ import png
 from bitarray import bitarray
 from packaging import version
 
-from slidescore.lib.image_utils import encode_png
-from slidescore.lib.omega_encoder import OmegaEncoder
+from ._image_utils import encode_png
+from ._omega_codec import OmegaEncoder
 
-from .AnnoClasses import Heatmap, Items, Points, Polygons
+from .containers import Heatmap, Items, Points, Polygons
 
 logger = logging.getLogger(__name__)
 
