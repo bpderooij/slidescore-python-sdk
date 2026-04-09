@@ -117,7 +117,7 @@ def test_heatmap_numitems_in_system_metadata():
     assert len(hm) == 1
     enc = Encoder(hm)
     assert enc.system_metadata["numItems"] == 1
-    assert enc.dataItems["numItems"] == 1
+    assert enc._data_items["numItems"] == 1
 
 
 def test_heatmap_zip_system_metadata(tmp_path):
@@ -144,9 +144,9 @@ def test_points_metadata_is_not_shared():
 
 def test_polygons_metadata_is_not_shared():
     p1 = Polygons()
-    p1.addPolygon([0, 0, 1, 0, 1, 1])
+    p1.add_polygon([0, 0, 1, 0, 1, 1])
     p2 = Polygons()
-    p2.addPolygon([2, 2, 3, 2, 3, 3])
+    p2.add_polygon([2, 2, 3, 2, 3, 3])
     p1.metadata[0] = {"label": "a"}
     assert 0 in p1.metadata
     assert 0 not in p2.metadata

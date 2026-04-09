@@ -1,51 +1,44 @@
 import array
-import logging
 
 from .containers import EfficientArray
 from ._polygon_container import PolygonContainer
 
-_logger = logging.getLogger(__name__)
-
-# Export functions
-supported_types = {"B": "uint8", "H": "uint16", "I": "uint32"}
+_SUPPORTED_TYPECODES: dict[str, str] = {"B": "uint8", "H": "uint16", "I": "uint32"}
 
 
-def encode_typed_arr(obj):
-    """Encodes a array.array into a bytebuffer and container object"""
+def encode_typed_arr(obj: array.array) -> list | dict:
+    """Encode an ``array.array`` into a msgpack-friendly container."""
     if len(obj) == 0:
         return []
-    if obj.typecode not in supported_types:
-        raise Exception("Unsupported typed array")
+    if obj.typecode not in _SUPPORTED_TYPECODES:
+        raise ValueError(f"Unsupported array typecode: {obj.typecode!r}")
 
-    array_type = supported_types[obj.typecode]
-
-    typed_array_obj = {
+    return {
         "isTypedArray": True,
         "bytes": obj.tobytes(),
-        "type": array_type,
+        "type": _SUPPORTED_TYPECODES[obj.typecode],
         "len": len(obj),
     }
-    return typed_array_obj
 
 
-def encode_effecient_arr(obj: EfficientArray):
-    """Encodes an EfficientArray into a container object with a destructered representation"""
+def encode_efficient_array(obj: EfficientArray) -> dict:
+    """Encode an ``EfficientArray`` into a msgpack-friendly container."""
     return {
         "isEfficientArray": True,
         "data": {
-            "offsetArray": obj.offsetArray,
-            "valuesArray": obj.valuesArray,
+            "offsetArray": obj.offset_array,
+            "valuesArray": obj.values_array,
             "length": len(obj),
         },
     }
 
 
-def encode_polygon_container(obj: PolygonContainer):
-    """Encodes a polygon container into a space effecient polygons buffer and the tile and negative polygons information"""
+def encode_polygon_container(obj: PolygonContainer) -> dict:
+    """Encode a ``PolygonContainer`` into a msgpack-friendly container."""
     return {
         "isPolygonContainer": True,
         "data": {
-            "allTiles": obj.allTiles,
+            "allTiles": obj.all_tiles,
             "polygons": obj.encode_polygons(),
             "negativePolygons": obj.polygons.negative_polygons_i,
             "tileSize": obj.tile_size,
@@ -54,9 +47,8 @@ def encode_polygon_container(obj: PolygonContainer):
 
 
 def msgpack_encoder(obj):
-    """Encoder that calls encode_polygon_container & encode_typed_arr for their respective objects"""
+    """Custom msgpack encoder for PolygonContainer and array.array objects."""
     if isinstance(obj, PolygonContainer):
         return encode_polygon_container(obj)
-
     if isinstance(obj, array.array):
         return encode_typed_arr(obj)

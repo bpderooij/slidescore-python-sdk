@@ -96,7 +96,7 @@ def _decode_polygon_blob(data: bytes) -> Polygons:
         chunk = flat[offset : offset + int(length)]
         offset += int(length)
         if chunk:
-            polygons.addPolygon(chunk)
+            polygons.add_polygon(chunk)
     return polygons
 
 
@@ -191,7 +191,7 @@ class Decoder:
         if "anno1_points.json.br" in self.anno2.namelist():
             data = json.loads(brotli.decompress(self.anno2.read("anno1_points.json.br")))
             for pt in data:
-                points.addPoint(int(pt["x"]), int(pt["y"]))
+                points.add_point(int(pt["x"]), int(pt["y"]))
             return points
 
         # Dense mask tiles
@@ -214,7 +214,7 @@ class Decoder:
                     tile_y = int(parts[2][1:].removesuffix(".png"))
                     tile_size, tile_points = _decode_mask_png(content)
                     for x, y in tile_points:
-                        points.addPoint(tile_x * tile_size + x, tile_y * tile_size + y)
+                        points.add_point(tile_x * tile_size + x, tile_y * tile_size + y)
         return points
 
     def _decode_heatmap(self) -> Heatmap:

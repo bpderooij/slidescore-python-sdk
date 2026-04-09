@@ -1,10 +1,8 @@
 import array
 
 
-def getSquareSegmentDistance(p, p1, p2):
-    """
-    Square distance between point and a segment
-    """
+def _sq_segment_distance(p, p1, p2):
+    """Square distance between point *p* and segment *p1*–*p2*."""
     x = p1[0]
     y = p1[1]
 
@@ -27,28 +25,26 @@ def getSquareSegmentDistance(p, p1, p2):
     return dx * dx + dy * dy
 
 
-def simplifyDouglasPeucker(points: array.array, tolerance: float):
-    length = int(len(points) // 2)
-    markers = []
-
+def _douglas_peucker(points: array.array, tolerance: float) -> array.array:
+    length = len(points) // 2
     first = 0
     last = length - 1
 
-    first_stack = []
-    last_stack = []
+    first_stack: list[int] = []
+    last_stack: list[int] = []
 
     new_points = array.array("I")
-
     markers = [first, last]
 
     while last:
         max_sqdist = 0
+        index = first
 
         for i in range(first, last):
             point_i = points[i * 2 : i * 2 + 2]
             point_first = points[first * 2 : first * 2 + 2]
             point_last = points[last * 2 : last * 2 + 2]
-            sqdist = getSquareSegmentDistance(point_i, point_first, point_last)
+            sqdist = _sq_segment_distance(point_i, point_first, point_last)
 
             if sqdist > max_sqdist:
                 index = i
@@ -63,23 +59,14 @@ def simplifyDouglasPeucker(points: array.array, tolerance: float):
             first_stack.append(index)
             last_stack.append(last)
 
-        # Can pop an empty array in Javascript, but not Python, so check
-        # the length of the list first
-        if len(first_stack) == 0:
-            first = None
-        else:
-            first = first_stack.pop()
-
-        if len(last_stack) == 0:
-            last = None
-        else:
-            last = last_stack.pop()
+        first = first_stack.pop() if first_stack else None
+        last = last_stack.pop() if last_stack else None
 
     markers.sort()
     for i in markers:
         new_points.extend(points[i * 2 : i * 2 + 2])
 
-    # [x1, y1, x1, y1] -> [x1, y1]
+    # Deduplicate when simplified to a single repeated point
     if (
         len(new_points) == 4
         and new_points[0] == new_points[2]
@@ -90,42 +77,16 @@ def simplifyDouglasPeucker(points: array.array, tolerance: float):
     return new_points
 
 
-def simplify(points: array.array, tolerance=1.0):
-    sqtolerance = tolerance * tolerance
-
-    points = simplifyDouglasPeucker(points, sqtolerance)
-
-    return points
+def simplify(points: array.array, tolerance: float = 1.0) -> array.array:
+    return _douglas_peucker(points, tolerance * tolerance)
 
 
-def gen_chunks(flat_list: list, chunk_size: int):
-    for i in range(0, len(flat_list), chunk_size):
-        yield flat_list[i : i + chunk_size]
-
-
-def simplifyPolygons(polygons_arr, tolerance=1.0):
+def simplify_polygons(polygons_arr, tolerance: float = 1.0):
     from .containers import EfficientArray
 
-    simp_polygons_arr = EfficientArray()
-    for polygon_i in range(len(polygons_arr)):
-        # List of [x1, y1, x2, y2, etc...]
-        polygon_orig = polygons_arr.getValues(polygon_i)
-        polygon_simp = simplify(polygon_orig, tolerance)
-        simp_polygons_arr.addValues(polygon_simp)
-    assert len(polygons_arr) == len(simp_polygons_arr)
-    return simp_polygons_arr
-
-
-if __name__ == "__main__":
-    import logging as _logging
-
-    _logging.basicConfig(level=_logging.DEBUG)
-    _log = _logging.getLogger(__name__)
-    from .containers import Polygons
-
-    _log.debug("Testing simplify algorithm")
-    almost_triangle = [0, 0, 100, 100, 105, 95, 200, 0]
-    polygons = Polygons()
-    polygons.addPolygon(almost_triangle)
-    res = simplify(almost_triangle, 1)
-    _log.debug("%s", list(res))
+    result = EfficientArray()
+    for i in range(len(polygons_arr)):
+        polygon = polygons_arr.get_values(i)
+        result.add_values(simplify(polygon, tolerance))
+    assert len(polygons_arr) == len(result)
+    return result

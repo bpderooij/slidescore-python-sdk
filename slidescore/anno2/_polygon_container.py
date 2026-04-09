@@ -1,55 +1,46 @@
 import array
 
 from .containers import Polygons
-from ._polygon_codec import polygons_2_bytes
+from ._polygon_codec import polygons_to_bytes
 
 
 class PolygonContainer:
-    """Container of polygons and the tiles that contain these respective polygons.
+    """Spatial index of polygons binned into tiles.
 
-    Every polygon is stored in a single list, and their index is stored in all tiles that might contain them
-    When saving to disk, use the encode_polygons method to compress the stored polygons into a space-effecient format
+    Each polygon index is stored in every tile whose bounding box it
+    intersects.  "Big" polygons are additionally tracked separately.
     """
 
     def __init__(self, tile_size: int, polygons: Polygons):
-        self.allTiles = {}
-        self.bigTiles = {}
+        self.all_tiles: dict = {}
+        self.big_tiles: dict = {}
         self.polygons = polygons
         self.tile_size = tile_size
 
     def store_polygon_i(
-        self, polygon_i, tile_range: dict[str, dict[str, int]], storeInBig: bool
-    ):
-        """Stores a polygon to a tile in a tile object
-
-        polygon_i: index of self.polygons[i]
-        tile_range: Dict with the start and end indices of the tiles containing the polygon
-        storeInBig: Boolean to indicate whether this is a "big" polygon and index should be stored in that map
-        """
-        # Add the index of the polygon to all tiles that are in it's bounding box
+        self, polygon_i: int, tile_range: dict[str, dict[str, int]], is_big: bool
+    ) -> None:
+        """Register *polygon_i* in all tiles covered by *tile_range*."""
         for tile_y in range(tile_range["y"]["start"], tile_range["y"]["end"] + 1):
             for tile_x in range(tile_range["x"]["start"], tile_range["x"]["end"] + 1):
+                if tile_y not in self.all_tiles:
+                    self.all_tiles[tile_y] = {}
+                if tile_x not in self.all_tiles[tile_y]:
+                    self.all_tiles[tile_y][tile_x] = array.array("I")
 
-                # Create the tiles if they do not exist yet
-                if tile_y not in self.allTiles:
-                    self.allTiles[tile_y] = {}
-                if tile_x not in self.allTiles[tile_y]:
-                    self.allTiles[tile_y][tile_x] = array.array("I")
+                if is_big and tile_y not in self.big_tiles:
+                    self.big_tiles[tile_y] = {}
+                if is_big and tile_x not in self.big_tiles[tile_y]:
+                    self.big_tiles[tile_y][tile_x] = array.array("I")
 
-                if storeInBig and tile_y not in self.bigTiles:
-                    self.bigTiles[tile_y] = {}
-                if storeInBig and tile_x not in self.bigTiles[tile_y]:
-                    self.bigTiles[tile_y][tile_x] = array.array("I")
+                self.all_tiles[tile_y][tile_x].append(polygon_i)
+                if is_big:
+                    self.big_tiles[tile_y][tile_x].append(polygon_i)
 
-                # Add the polygon index to the tiles
-                self.allTiles[tile_y][tile_x].append(polygon_i)
-                if storeInBig:
-                    self.bigTiles[tile_y][tile_x].append(polygon_i)
+    def encode_polygons(self) -> bytes:
+        """Encode stored polygons into a space-efficient binary format."""
+        return polygons_to_bytes(self.polygons.polygons)
 
-    def encode_polygons(self):
-        """Encode the stored polygons in a very space effecient manner."""
-        return polygons_2_bytes(self.polygons.polygons)
-
-    def encode_simplified_polygons(self):
-        """Encode the 'simplified_polygons' in the Polygons to space-effecient bytes"""
-        return polygons_2_bytes(self.polygons.simplified_polygons)
+    def encode_simplified_polygons(self) -> bytes:
+        """Encode simplified polygon copies into a space-efficient binary format."""
+        return polygons_to_bytes(self.polygons.simplified_polygons)

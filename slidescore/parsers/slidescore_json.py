@@ -15,10 +15,10 @@ def read_slidescore_json(data) -> Points | Polygons | Heatmap:
     for brush entries is assigned to the first positive polygon only).
     """
     if not isinstance(data, list):
-        raise Exception("Expected a list as data")
+        raise TypeError("Expected a list as data")
 
     if len(data) == 0:
-        raise Exception("Data is an empty list, cannot convert")
+        raise ValueError("Data is an empty list, cannot convert")
 
     # Points are stored as a raw list of xy pairs without a "type" key
     if "type" not in data[0]:
@@ -28,10 +28,10 @@ def read_slidescore_json(data) -> Points | Polygons | Heatmap:
             for point in data:
                 x = int(point["x"])
                 y = int(point["y"])
-                items.addPoint(x, y)
+                items.add_point(x, y)
             return items
         else:
-            raise Exception("Unsupported slidescore JSON: type not specified")
+            raise ValueError("Unsupported slidescore JSON: type not specified")
 
     if data[0]["type"] == "heatmap":
         x_offset = data[0]["x"] if "x" in data[0] else 0
@@ -51,7 +51,7 @@ def read_slidescore_json(data) -> Points | Polygons | Heatmap:
             for point in entry["points"]:
                 x, y = round(point["x"]), round(point["y"])
                 cur_polygon.extend([x, y])
-            polygon_i = items.addPolygon(cur_polygon)
+            polygon_i = items.add_polygon(cur_polygon)
             if "labels" in entry:
                 for label in entry["labels"]:
                     label["polygon_i"] = polygon_i
@@ -63,16 +63,16 @@ def read_slidescore_json(data) -> Points | Polygons | Heatmap:
                 for point in polygon:
                     x, y = round(point["x"]), round(point["y"])
                     cur_polygon.extend([x, y])
-                pos_polygon_i = items.addPolygon(cur_polygon)
+                pos_polygon_i = items.add_polygon(cur_polygon)
                 pos_polygon_is.append(pos_polygon_i)
             for neg_polygon in entry["negativePolygons"]:
                 cur_neg_polygon = []
                 for point in neg_polygon:
                     x, y = round(point["x"]), round(point["y"])
                     cur_neg_polygon.extend([x, y])
-                neg_polygon_i = items.addPolygon(cur_neg_polygon)
+                neg_polygon_i = items.add_polygon(cur_neg_polygon)
                 for pos_polygon_i in pos_polygon_is:
-                    items.linkPosPolygonToNegPolygon(pos_polygon_i, neg_polygon_i)
+                    items.link_negative(pos_polygon_i, neg_polygon_i)
             if "labels" in entry:
                 for label in entry["labels"]:
                     label["polygon_i"] = pos_polygon_is[0]
@@ -115,7 +115,7 @@ def read_slidescore_json(data) -> Points | Polygons | Heatmap:
                 cur_polygon.extend([p[0], p[1]])
             for p in retq4:
                 cur_polygon.extend([p[0], p[1]])
-            polygon_i = items.addPolygon(cur_polygon)
+            polygon_i = items.add_polygon(cur_polygon)
             if "labels" in entry:
                 for label in entry["labels"]:
                     label["polygon_i"] = polygon_i
@@ -133,13 +133,13 @@ def read_slidescore_json(data) -> Points | Polygons | Heatmap:
                 round(corner["x"]),
                 round(corner["y"] + size["y"]),
             ]
-            polygon_i = items.addPolygon(cur_polygon)
+            polygon_i = items.add_polygon(cur_polygon)
             if "labels" in entry:
                 for label in entry["labels"]:
                     label["polygon_i"] = polygon_i
                     items.labels.append(label)
         else:
-            raise Exception(
+            raise ValueError(
                 f'Unsupported slidescore JSON type: "{entry["type"]}" not supported'
             )
     return items

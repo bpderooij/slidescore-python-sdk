@@ -35,7 +35,7 @@ def read_tsv_heatmap(path: str) -> Heatmap:
         for line in fh:
             line_parts = line.split()
             x, y, value = int(line_parts[0]), int(line_parts[1]), int(line_parts[2])
-            heatmap.setPoint(x, y, value)
+            heatmap.set_point(x, y, value)
 
     return heatmap
 
@@ -72,6 +72,6 @@ def read_tsv_binary_heatmap(path: str) -> Heatmap:
         for line in fh:
             line_parts = line.split()
             x, y = int(line_parts[0]), int(line_parts[1])
-            heatmap.setPoint(x, y, 255)
+            heatmap.set_point(x, y, 255)
 
     return heatmap

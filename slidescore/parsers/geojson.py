@@ -25,7 +25,7 @@ def read_geo_json(path: str) -> Points | Polygons:
         if len(positive_vertices) == 1:
             point = positive_vertices[0]
             x, y = round(point[0]), round(point[1])
-            points.addPoint(x, y)
+            points.add_point(x, y)
             if metadata is not None:
                 points.metadata[f"{x},{y}"] = metadata
         else:
@@ -33,7 +33,7 @@ def read_geo_json(path: str) -> Points | Polygons:
             for point in positive_vertices:
                 x, y = round(point[0]), round(point[1])
                 cur_polygon.extend([x, y])
-            pos_polygon_i = polygons.addPolygon(cur_polygon)
+            pos_polygon_i = polygons.add_polygon(cur_polygon)
 
             if metadata is not None:
                 polygons.metadata[pos_polygon_i] = metadata
@@ -43,11 +43,11 @@ def read_geo_json(path: str) -> Points | Polygons:
                 for point in negative_vertices:
                     x, y = round(point[0]), round(point[1])
                     cur_neg_polygon.extend([x, y])
-                neg_polygon_i = polygons.addPolygon(cur_neg_polygon)
-                polygons.linkPosPolygonToNegPolygon(pos_polygon_i, neg_polygon_i)
+                neg_polygon_i = polygons.add_polygon(cur_neg_polygon)
+                polygons.link_negative(pos_polygon_i, neg_polygon_i)
 
     if len(points) == 0 and len(polygons) == 0:
-        raise Exception("No points or polygons loaded from GeoJSON")
+        raise ValueError("No points or polygons loaded from GeoJSON")
 
     if len(points) != 0 and len(polygons) == 0:
         return points

@@ -10,7 +10,7 @@ import brotli
 import msgpack
 
 from .containers import Heatmap, Item, Items, Points, Polygons
-from ._image_utils import encode_png, get_png_bytes, lookup_table_2_png
+from ._image_utils import encode_png, _points_to_png, lookup_table_to_png
 from ._polygon_container import PolygonContainer
 from ._serializers import msgpack_encoder
 
@@ -18,85 +18,68 @@ _logger = logging.getLogger(__name__)
 
 
 class Encoder:
-    """Encompassing class to encode AnnoClasses"""
+    """Encode Points, Polygons, or Heatmap into an Anno2 ZIP archive."""
 
-    big_polygon_size_cutoff = (
-        100 * 100
-    )  # Size that is considered a "big" polygon, saved seperatly
-    few_points_cutoff = 500 * 1000  # Determined using some tests
-    low_density_cutoff = 30  # If there are fewer than 30 points per 256x256 PNG tile, save points as json
+    big_polygon_size_cutoff = 100 * 100  # bounding-box area threshold for "big" polygons
+    few_points_cutoff = 500 * 1000
+    low_density_cutoff = 30  # points per 256×256 tile below which JSON is preferred
 
-    def __init__(self, items: Items, big_polygon_size_cutoff=100 * 100) -> None:
-        """Initialize encoder with a list of either Points or Polygons or Heatmap
-
-        A point should be a tuple of (image_x, image_y).
-        A polygon should be a dictionary with "positiveVertices" containing a list of points.
-            And possible a key "negativeVertices" contain a seperate polygon"""
+    def __init__(self, items: Items, big_polygon_size_cutoff: int = 100 * 100) -> None:
         self.items = items
         self.big_polygon_size_cutoff = big_polygon_size_cutoff
-        self.dataItems = {"numItems": len(items)}
-        self.dataLookup = []
+        self._data_items: dict = {"numItems": len(items)}
+        self._data_lookups: list = []
 
-        type_string = (
-            items.name.lower()
-        )  # can be points/mask/polygons/heatmap/binary-heatmap
+        type_string = items.name.lower()
         self.system_metadata = {
             "version": "0.2.0",
             "type": type_string,
             "numItems": len(items),
         }
-        self.user_metadata = {}
+        self.user_metadata: dict = {}
 
         if isinstance(items, Points):
             _logger.debug(
                 "Loaded %s points in encoder, type: %s",
-                self.dataItems["numItems"],
+                self._data_items["numItems"],
                 type_string,
             )
         elif isinstance(items, Polygons):
             self.items = copy.deepcopy(items)
-            num_points = int(len(self.items.polygons.valuesArray) / 2)
+            num_points = len(self.items.polygons.values_array) // 2
             _logger.debug(
                 "Loaded %s polygons in encoder, with num points %s",
-                self.dataItems["numItems"],
+                self._data_items["numItems"],
                 num_points,
             )
             self.items.simplify()
-            num_points = int(len(self.items.polygons.valuesArray) / 2)
+            num_points = len(self.items.polygons.values_array) // 2
             _logger.debug("Simplified to num points %s", num_points)
-
         elif isinstance(items, Heatmap):
             _logger.debug(
                 "Loaded %s byte %s in encoder, with shape %s %s",
-                self.dataItems["numItems"],
+                self._data_items["numItems"],
                 items.name,
                 len(items.matrix),
                 len(items.matrix[0]),
             )
 
-    def calc_rect_around_item(self, item: Item):
-        """Calculates a bounding box around a point or polygon, if it is a point the rectangle is the point"""
+    def _bounding_box(self, item: Item) -> tuple[float, float, float, float]:
+        """Return (min_x, min_y, max_x, max_y) for a point or polygon."""
         if isinstance(self.items, Points):
-            item = [item]  # Pack it like a polygon with 1 point
+            vertices = [item]
         else:
-            item = item["positiveVertices"]  # Extract the positive vertices
-        # Save the most extreme x and y values
-        min_x = float("inf")
-        min_y = float("inf")
-        max_x = float("-inf")
-        max_y = float("-inf")
-        for point in item:
-            x, y = point
-            min_x = min(x, min_x)
-            min_y = min(y, min_y)
-            max_x = max(x, max_x)
-            max_y = max(y, max_y)
+            vertices = item["positiveVertices"]
+
+        min_x = min(p[0] for p in vertices)
+        min_y = min(p[1] for p in vertices)
+        max_x = max(p[0] for p in vertices)
+        max_y = max(p[1] for p in vertices)
         return min_x, min_y, max_x, max_y
 
-    def calc_tile_range(
+    def _tile_range(
         self, min_x: float, min_y: float, max_x: float, max_y: float, tile_size: int
-    ):
-        """Calculates the tiles that intersect with a bounding box"""
+    ) -> dict:
         return {
             "x": {
                 "start": math.floor(min_x / tile_size),
@@ -108,127 +91,85 @@ class Encoder:
             },
         }
 
-    def get_polygon_size(self, item: Item):
-        """Calculates the area the bounding box around a polygon covers"""
-        polygon_rect = self.calc_rect_around_item(item)
-        min_x, min_y, max_x, max_y = polygon_rect
-        width = max_x - min_x
-        height = max_y - min_y
-        return width * height
+    def _polygon_bbox_area(self, item: Item) -> float:
+        min_x, min_y, max_x, max_y = self._bounding_box(item)
+        return (max_x - min_x) * (max_y - min_y)
 
-    def get_tiles_containing_item(self, item: Item, tile_size: int):
-        """Calculates which tile indices contain a point or polygon"""
-        polygon_rect = self.calc_rect_around_item(item)
-        min_x, min_y, max_x, max_y = polygon_rect
-        # Find the tiles this rect is in
-        tile_range = self.calc_tile_range(min_x, min_y, max_x, max_y, tile_size)
-        return tile_range
+    def _tiles_for_item(self, item: Item, tile_size: int) -> dict:
+        min_x, min_y, max_x, max_y = self._bounding_box(item)
+        return self._tile_range(min_x, min_y, max_x, max_y, tile_size)
 
-    def generate_tile_data(self, tile_size=256):
-        """Bin the loaded items (points/polygons) into seperate tiles. Optionally encodes these
-        tiles into PNG's for points, and keeps track of big polygons in the tiles."""
-
-        # Save the tile_bins in the appropriate location
+    def generate_tile_data(self, tile_size: int = 256) -> None:
+        """Bin items into tiles and store the result in ``_data_items``."""
         if isinstance(self.items, Points):
-            # Convert the points into masks
-            self.dataItems["masks"] = self.bin_points_into_tiles(tile_size)
+            self._data_items["masks"] = self._bin_points_into_tiles(tile_size)
         elif isinstance(self.items, Polygons):
-            self.dataItems["polygonContainer"] = self.bin_polygons_into_tiles(tile_size)
+            self._data_items["polygonContainer"] = self._bin_polygons_into_tiles(tile_size)
         elif isinstance(self.items, Heatmap):
             height, width = len(self.items.matrix), len(self.items.matrix[0])
-            self.dataItems["heatmapPng"] = encode_png(
+            self._data_items["heatmapPng"] = encode_png(
                 self.items.matrix, width, height, bitdepth=8
             )
 
-    def bin_points_into_tiles(self, tile_size):
-        """Bins the loaded items into a tile-based format. These are basically masks.
-        So this format is generally referred to as masks.
-
-        Uses a dictionary of tile indices data[tile_y][tile_x] = list of points in tile.
-        Encodes the tiles as PNG's for more effecient storage.
-        """
+    def _bin_points_into_tiles(self, tile_size: int):
         items = self.items
-
-        # Determine if we want to store the points as a compressed JSON, or as PNG tiles
         are_few_points = len(items) < self.few_points_cutoff
-        is_points = self.items.name == "points"  # Could also be mask
+        is_points = items.name == "points"
 
         if are_few_points and is_points:
             _logger.debug("Detected few points (%s), saving anno1 JSON", len(items))
-            # Instead encode as a Anno1 JSON, that will get compressed when dumping to a file
-            anno1_points = [{"x": img_x, "y": img_y} for img_x, img_y in items]
-            return json.dumps(anno1_points)
+            return json.dumps([{"x": x, "y": y} for x, y in items])
 
-        tile_bins = {}
+        tile_bins: dict = {}
         num_tiles = 0
         for point in items:
-            # Calculate the tile this point is in
             img_x, img_y = point
             tile_x = math.floor(img_x / tile_size)
             tile_y = math.floor(img_y / tile_size)
 
-            # Create tile lookup if not present yet
             if tile_y not in tile_bins:
                 tile_bins[tile_y] = {}
             if tile_x not in tile_bins[tile_y]:
-                # Make array to hold the points
                 tile_bins[tile_y][tile_x] = []
                 num_tiles += 1
 
-            # Add point to tile
-            new_point = (img_x % tile_size, img_y % tile_size)
-            tile_bins[tile_y][tile_x].extend(new_point)
+            tile_bins[tile_y][tile_x].extend((img_x % tile_size, img_y % tile_size))
 
-        # If we detect that the density of points is low, e.g. < 30 points per 256x256 tile,
-        # encode as JSON anyway
         num_points_per_tile = len(items) / num_tiles
         if num_points_per_tile < self.low_density_cutoff and is_points:
             _logger.debug(
                 "Detected low density of points (%s / tile), saving anno1 JSON",
                 round(num_points_per_tile),
             )
-            anno1_points = [{"x": img_x, "y": img_y} for img_x, img_y in items]
-            return json.dumps(anno1_points)
+            return json.dumps([{"x": x, "y": y} for x, y in items])
 
-        # When we are done binning all points into the tiles, compress the tiles
-        # into PNGs. A single PNG is a mask.
         _logger.debug(
-            "Compressing tiles as png's: %s tiles, %s points, %.1f pts/tile",
+            "Compressing tiles as PNGs: %s tiles, %s points, %.1f pts/tile",
             num_tiles,
             len(items),
             len(items) / num_tiles,
         )
         for tile_y in tile_bins:
             for tile_x in tile_bins[tile_y]:
-                tile = tile_bins[tile_y][tile_x]
-                img_bytes = get_png_bytes(tile, tile_size)
-                tile_bins[tile_y][tile_x] = img_bytes
+                tile_bins[tile_y][tile_x] = _points_to_png(
+                    tile_bins[tile_y][tile_x], tile_size
+                )
         _logger.debug("Done compressing tiles")
         return tile_bins
 
-    def bin_polygons_into_tiles(self, tile_size: int):
-        """Similar to bin_points_into_tiles, this bins the polygons into tiles. It uses the bounding box
-        around a polygon to estimate where to bin them in. Also stores the big polygons in a seperate list.
-        """
+    def _bin_polygons_into_tiles(self, tile_size: int) -> PolygonContainer:
         items = self.items
         tile_bins = PolygonContainer(tile_size, items)
 
-        for i in range(len(items)):
-            polygon = items[i]
-            polygon_size = self.get_polygon_size(polygon)
-            is_big_polygon = polygon_size > self.big_polygon_size_cutoff
-            tile_range = self.get_tiles_containing_item(polygon, tile_size)
-
-            # Add the polygon to the container
-            tile_bins.store_polygon_i(i, tile_range, is_big_polygon)
-            del polygon
+        for i, polygon in enumerate(items):
+            is_big = self._polygon_bbox_area(polygon) > self.big_polygon_size_cutoff
+            tile_range = self._tiles_for_item(polygon, tile_size)
+            tile_bins.store_polygon_i(i, tile_range, is_big)
 
         return tile_bins
 
-    # Lookup table generation
-    def populate_lookup_tables(self):
-        """Bins items into seperate "tiles", which are then used to create a density map PNG to give a simplified representation
-        of the items that can easily be process/drawn."""
+    def populate_lookup_tables(self) -> None:
+        """Build density-map PNGs and store them in ``_data_lookups``."""
         if isinstance(self.items, Heatmap):
             _logger.debug("Skipping lookup table generation for heatmap")
             return
@@ -238,235 +179,171 @@ class Encoder:
             return
 
         for tile_size in [32, 256]:
-            # Check if we can use the fast path using an old lookup table
-            fast_path_option = next(
-                filter(
-                    lambda lookupData: tile_size % lookupData["tile_size"] == 0,
-                    self.dataLookup,
+            fast_path = next(
+                (
+                    d
+                    for d in self._data_lookups
+                    if tile_size % d["tile_size"] == 0
                 ),
                 None,
             )
 
-            if fast_path_option:
-                lookup_table = self.bin_items_into_lookup_table_fast(
-                    tile_size, fast_path_option["tile_size"], fast_path_option["lookup"]
+            if fast_path:
+                lookup_table = self._bin_lookup_fast(
+                    tile_size, fast_path["tile_size"], fast_path["lookup"]
                 )
             else:
-                lookup_table = self.bin_items_into_lookup_table(tile_size)
+                lookup_table = self._bin_lookup(tile_size)
 
-            lookup_table["png"] = lookup_table_2_png(lookup_table)
-            self.dataLookup.append(lookup_table)
+            lookup_table["png"] = lookup_table_to_png(lookup_table)
+            self._data_lookups.append(lookup_table)
             _logger.debug("Done with lookup table of size %s", tile_size)
 
-    def bin_items_into_lookup_table(self, tile_size: int):
-        """Method to bin items into "tiles" of a certain size and keep track on how many items fall inside such a tile.
-        Used to create density maps."""
+    def _bin_lookup(self, tile_size: int) -> dict:
         items = self.items
-        # Need to add a factor for polygons because 1 polygon paints many pixels
-        num_points_to_add = 1 if isinstance(self.items, Points) else 15
+        num_points_to_add = 1 if isinstance(items, Points) else 15
 
-        tile_bins = {}
-        data = {
-            "tile_size": tile_size,
-            "lookup": tile_bins,
-            "maxValue": 0,
-        }
+        tile_bins: dict = {}
+        data = {"tile_size": tile_size, "lookup": tile_bins, "maxValue": 0}
 
-        for i in range(len(items)):
-            item = items[i]
-
-            # Ignore big polygons for lookup generation
+        for i, item in enumerate(items):
             if isinstance(items, Polygons):
-                polygon_size = self.get_polygon_size(item)
-                is_big_polygon = polygon_size > self.big_polygon_size_cutoff
-                if is_big_polygon:
+                if self._polygon_bbox_area(item) > self.big_polygon_size_cutoff:
                     continue
 
-            tile_range = self.get_tiles_containing_item(item, tile_size)
-
-            # Add polygon to every tile present in this tile_range (add one since range is inclusive)
-            for yI in range(tile_range["y"]["start"], tile_range["y"]["end"] + 1):
-                for xI in range(tile_range["x"]["start"], tile_range["x"]["end"] + 1):
-                    # Create tile lookup if not present yet
-                    if yI not in tile_bins:
-                        tile_bins[yI] = {}
-                    if xI not in tile_bins[yI]:
-                        tile_bins[yI][xI] = 0
-
-                    # Add one to it
-
-                    tile_bins[yI][xI] += num_points_to_add
-                    data["maxValue"] = max(data["maxValue"], tile_bins[yI][xI])
+            tile_range = self._tiles_for_item(item, tile_size)
+            for y in range(tile_range["y"]["start"], tile_range["y"]["end"] + 1):
+                for x in range(tile_range["x"]["start"], tile_range["x"]["end"] + 1):
+                    if y not in tile_bins:
+                        tile_bins[y] = {}
+                    if x not in tile_bins[y]:
+                        tile_bins[y][x] = 0
+                    tile_bins[y][x] += num_points_to_add
+                    data["maxValue"] = max(data["maxValue"], tile_bins[y][x])
 
         return data
 
-    def bin_items_into_lookup_table_fast(
-        self, new_tile_size: int, old_tile_size: int, old_lookup_table
-    ):
-        """Faster method to create lookup tables for density maps. By using a previously determined smaller tile
-        lookup entry, you can easily sum the small tiles that fall inside the big tile.
-        """
+    def _bin_lookup_fast(
+        self, new_tile_size: int, old_tile_size: int, old_lookup: dict
+    ) -> dict:
+        """Derive a coarser lookup table by summing a finer one."""
         if new_tile_size % old_tile_size != 0:
-            raise Exception("Cannot use fast method")
+            raise ValueError("Cannot use fast path: tile sizes are not multiples")
 
-        tile_index_ratio = (
-            new_tile_size / old_tile_size
-        )  # Always an int as checked above
+        ratio = new_tile_size / old_tile_size
+        tile_bins: dict = {}
+        data = {"tile_size": new_tile_size, "lookup": tile_bins, "maxValue": 0}
 
-        tile_bins = {}
-        data = {
-            "tile_size": new_tile_size,
-            "lookup": tile_bins,
-            "maxValue": 0,
-        }
+        for y, row in old_lookup.items():
+            for x, count in row.items():
+                new_y = math.floor(y / ratio)
+                new_x = math.floor(x / ratio)
+                if new_y not in tile_bins:
+                    tile_bins[new_y] = {}
+                if new_x not in tile_bins[new_y]:
+                    tile_bins[new_y][new_x] = 0
+                tile_bins[new_y][new_x] += count
+                data["maxValue"] = max(tile_bins[new_y][new_x], data["maxValue"])
 
-        for yI in old_lookup_table:
-            row = old_lookup_table[yI]
-            for xI in row:
-                num_points = row[xI]
-                # Calculate the indices in the new lookup table
-                new_yI = math.floor(yI / tile_index_ratio)
-                new_xI = math.floor(xI / tile_index_ratio)
-
-                # Create tile lookup if not present yet
-                if new_yI not in tile_bins:
-                    tile_bins[new_yI] = {}
-                if new_xI not in tile_bins[new_yI]:
-                    tile_bins[new_yI][new_xI] = 0
-
-                tile_bins[new_yI][new_xI] += num_points
-                data["maxValue"] = max(tile_bins[new_yI][new_xI], data["maxValue"])
         return data
 
-    def dump_to_file(self, path: str):
-        """Dumps the encoded items to a ZIP file on disk. Also encodes the polygon if needed."""
+    def dump_to_file(self, path: str) -> None:
+        """Encode and write all data to an Anno2 ZIP file at *path*."""
         _logger.debug("Encoding and dumping to zipfile")
 
         if not path.endswith(".zip"):
             path += ".zip"
 
-        with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_STORED) as zip:
-            # Add metadata files
-            system_metadata_bytes = str.encode(
-                json.dumps(self.system_metadata, indent=2)
+        with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_STORED) as zf:
+            zf.writestr(
+                "system_metadata.json",
+                json.dumps(self.system_metadata, indent=2).encode(),
             )
-            zip.writestr("system_metadata.json", system_metadata_bytes)
+            zf.writestr(
+                "user_metadata.json",
+                json.dumps(self.user_metadata, indent=2).encode(),
+            )
 
-            user_metadata_bytes = str.encode(json.dumps(self.user_metadata, indent=2))
-            zip.writestr("user_metadata.json", user_metadata_bytes)
+            for lookup_data in self._data_lookups:
+                zf.writestr(
+                    f"lookup-tables/density_{lookup_data['tile_size']}px.png",
+                    lookup_data["png"],
+                )
 
-            # Add lookup tables
-            for lookup_data in self.dataLookup:
-                tile_size = lookup_data["tile_size"]
-                png_bytes = lookup_data["png"]
-
-                # Add the png
-                zip.writestr(f"lookup-tables/density_{tile_size}px.png", png_bytes)
-
-            # Add mask data
-            if "masks" in self.dataItems:
-                if isinstance(self.dataItems["masks"], dict):
+            if "masks" in self._data_items:
+                if isinstance(self._data_items["masks"], dict):
                     tar_gz_fh = io.BytesIO()
                     with tarfile.open(fileobj=tar_gz_fh, mode="w:gz") as tar:
-                        tile_bins = self.dataItems["masks"]
-                        for tile_y in tile_bins:
-                            for tile_x in tile_bins[tile_y]:
-                                tile_png_bytes = tile_bins[tile_y][tile_x]
-                                fn = f"tile_x{tile_x}_y{tile_y}.png"
-                                add_buffer_2_tar(tar, tile_png_bytes, fn)
-                    zip.writestr("masks.tar.gz", tar_gz_fh.getbuffer())
+                        for tile_y, row in self._data_items["masks"].items():
+                            for tile_x, tile_png_bytes in row.items():
+                                _add_to_tar(tar, tile_png_bytes, f"tile_x{tile_x}_y{tile_y}.png")
+                    zf.writestr("masks.tar.gz", tar_gz_fh.getbuffer())
                 else:
-                    zip.writestr(
+                    zf.writestr(
                         "anno1_points.json.br",
-                        brotli.compress(self.dataItems["masks"].encode(), quality=8),
+                        brotli.compress(self._data_items["masks"].encode(), quality=8),
                     )
 
-            # Add metadata if available, this is both for polygons and points
             has_metadata = len(getattr(self.items, "metadata", []))
             if has_metadata:
-                item_metadata_json = json.dumps(self.items.metadata)
-                item_metadata_json_compressed_bytes = brotli.compress(
-                    str.encode(item_metadata_json), quality=8
-                )
-                zip.writestr(
-                    "items_metadata.json.br", item_metadata_json_compressed_bytes
+                zf.writestr(
+                    "items_metadata.json.br",
+                    brotli.compress(
+                        json.dumps(self.items.metadata).encode(), quality=8
+                    ),
                 )
 
-            # Add polygons if possible
-            if "polygonContainer" in self.dataItems:
-                add_polygon_container_2_zip(
-                    zip, self.dataItems["polygonContainer"], "polygon_container"
-                )
-            # Add any labels if present
+            if "polygonContainer" in self._data_items:
+                _add_polygon_container(zf, self._data_items["polygonContainer"], "polygon_container")
+
             if isinstance(self.items, Polygons) and len(self.items.labels) > 0:
-                labels_bytes = str.encode(json.dumps(self.items.labels, indent=2))
-                zip.writestr("labels.json", labels_bytes)
-
-            # Add heatmap if available
-            if "heatmapPng" in self.dataItems:
-                zip.writestr("heatmap.png", self.dataItems["heatmapPng"])
-                # Add heatmap metadata
-                heatmap_metadata_bytes = str.encode(
-                    json.dumps(self.items.get_metadata(), indent=2)
+                zf.writestr(
+                    "labels.json",
+                    json.dumps(self.items.labels, indent=2).encode(),
                 )
-                zip.writestr("heatmap_metadata.json", heatmap_metadata_bytes)
 
-    def add_metadata(self, metadata):
-        """Stores a metadata object that gets copied into the output file"""
+            if "heatmapPng" in self._data_items:
+                zf.writestr("heatmap.png", self._data_items["heatmapPng"])
+                zf.writestr(
+                    "heatmap_metadata.json",
+                    json.dumps(self.items.get_metadata(), indent=2).encode(),
+                )
+
+    def add_metadata(self, metadata: dict) -> None:
+        """Set user metadata to include in the output ZIP."""
         self.user_metadata = metadata
 
 
-def flat(items):
-    """Flattens list from [[1, 2], [3, [4]]] -> [1, 2, 3, [4]]"""
-    return [item for sublist in items for item in sublist]
-
-
-def add_polygon_container_2_zip(zip, container, dir_name):
-    """Utility to encode a polygon container class and add it to a ZIP file"""
-    # Start with the polygon indices in each tile
-    tile_polygons_i = container.allTiles
-    tile_polygons_i_bytes = msgpack.dumps(tile_polygons_i, default=msgpack_encoder)
-    tile_polygons_i_compressed_bytes = brotli.compress(tile_polygons_i_bytes, quality=8)
-
-    zip.writestr(
-        f"{dir_name}/tile_polygons_i.msgpack.br", tile_polygons_i_compressed_bytes
+def _add_polygon_container(zf: zipfile.ZipFile, container: PolygonContainer, dir_name: str) -> None:
+    """Encode a PolygonContainer and write its members into *zf*."""
+    tile_polygons_i_bytes = msgpack.dumps(container.all_tiles, default=msgpack_encoder)
+    zf.writestr(
+        f"{dir_name}/tile_polygons_i.msgpack.br",
+        brotli.compress(tile_polygons_i_bytes, quality=8),
     )
 
-    # Also store the big polygon indices in each tile
-    big_tile_polygons_i = container.bigTiles
-    big_tile_polygons_i_bytes = msgpack.dumps(
-        big_tile_polygons_i, default=msgpack_encoder
-    )
-    big_tile_polygons_i_compressed_bytes = brotli.compress(
-        big_tile_polygons_i_bytes, quality=8
-    )
-
-    zip.writestr(
+    big_tile_polygons_i_bytes = msgpack.dumps(container.big_tiles, default=msgpack_encoder)
+    zf.writestr(
         f"{dir_name}/big_tile_polygons_i.msgpack.br",
-        big_tile_polygons_i_compressed_bytes,
+        brotli.compress(big_tile_polygons_i_bytes, quality=8),
     )
 
-    # Then add the (compressed) encoded polygon bytes
-    polygon_bytes = container.encode_polygons()
-    polygon_compressed_bytes = brotli.compress(polygon_bytes, quality=8)
-    zip.writestr(f"{dir_name}/encoded_polygons.bin.br", polygon_compressed_bytes)
-
-    # Then add the (compressed) simplified encoded polygon bytes
-    simpl_polygon_bytes = container.encode_simplified_polygons()
-    simpl_polygon_compressed_bytes = brotli.compress(simpl_polygon_bytes, quality=8)
-    zip.writestr(
-        f"{dir_name}/simpl_encoded_polygons.bin.br", simpl_polygon_compressed_bytes
+    zf.writestr(
+        f"{dir_name}/encoded_polygons.bin.br",
+        brotli.compress(container.encode_polygons(), quality=8),
+    )
+    zf.writestr(
+        f"{dir_name}/simpl_encoded_polygons.bin.br",
+        brotli.compress(container.encode_simplified_polygons(), quality=8),
+    )
+    zf.writestr(
+        f"{dir_name}/negative_polygons.json",
+        json.dumps(container.polygons.negative_polygons_i, indent=2).encode(),
     )
 
-    # Finally add the negative polygons
-    negative_polygons_bytes = str.encode(
-        json.dumps(container.polygons.negative_polygons_i, indent=2)
-    )
-    zip.writestr(f"{dir_name}/negative_polygons.json", negative_polygons_bytes)
 
-
-def add_buffer_2_tar(tar, buffer, name):
-    """Utility to add a buffer to a TARball with a certain name. Used to encode the points tile PNG's"""
-    tarInfo = tarfile.TarInfo(name=name)
-    tarInfo.size = len(buffer)
-    tar.addfile(tarInfo, io.BytesIO(buffer))
+def _add_to_tar(tar: tarfile.TarFile, buffer: bytes, name: str) -> None:
+    """Add a bytes buffer to a tar archive under *name*."""
+    info = tarfile.TarInfo(name=name)
+    info.size = len(buffer)
+    tar.addfile(info, io.BytesIO(buffer))

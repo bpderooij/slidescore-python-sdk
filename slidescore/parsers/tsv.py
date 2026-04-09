@@ -18,7 +18,7 @@ def read_tsv(path: str, points_type: str, support_experimental: bool = False):
     is_heatmap = line_parts[0].lower() == "heatmap"
     is_binary_heatmap = line_parts[0].lower() == "binary-heatmap"
     if is_binary_heatmap and not support_experimental:
-        raise Exception(
+        raise ValueError(
             "Wanted to encode a binary heatmap but --experimental is not present"
         )
 
@@ -49,7 +49,7 @@ def read_tsv_points(path: str) -> Points:
             if len(line_parts) < 2:
                 continue
             x, y = int(line_parts[0]), int(line_parts[1])
-            items.addPoint(x, y)
+            items.add_point(x, y)
 
     return items
 
@@ -64,6 +64,6 @@ def read_tsv_polygons(path: str) -> Polygons:
             if len(line_parts) < 2:
                 continue
             cur_polygon = [int(point) for point in line_parts]
-            items.addPolygon(cur_polygon)
+            items.add_polygon(cur_polygon)
 
     return items
