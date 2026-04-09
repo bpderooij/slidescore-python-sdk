@@ -1,6 +1,6 @@
 import array
 
-from .containers import Polygons
+from .containers import Polygons, TileRange
 from ._polygon_codec import polygons_to_bytes
 
 
@@ -18,11 +18,11 @@ class PolygonContainer:
         self.tile_size = tile_size
 
     def store_polygon_i(
-        self, polygon_i: int, tile_range: dict[str, dict[str, int]], is_big: bool
+        self, polygon_i: int, tile_range: TileRange, is_big: bool
     ) -> None:
         """Register *polygon_i* in all tiles covered by *tile_range*."""
-        for tile_y in range(tile_range["y"]["start"], tile_range["y"]["end"] + 1):
-            for tile_x in range(tile_range["x"]["start"], tile_range["x"]["end"] + 1):
+        for tile_y in range(tile_range.y_start, tile_range.y_end + 1):
+            for tile_x in range(tile_range.x_start, tile_range.x_end + 1):
                 if tile_y not in self.all_tiles:
                     self.all_tiles[tile_y] = {}
                 if tile_x not in self.all_tiles[tile_y]:

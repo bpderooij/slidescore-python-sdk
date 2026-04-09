@@ -3,6 +3,7 @@ from __future__ import annotations
 import array
 import logging
 from collections.abc import Sequence
+from typing import NamedTuple, TypedDict
 
 from slidescore.anno2._simplify import simplify_polygons
 
@@ -57,7 +58,7 @@ class Polygons(Sequence):
             start, stop, step = i.indices(len(self))
             return [self[index] for index in range(start, stop, step)]
 
-        points_flat = self.polygons.get_values(i)
+        points_flat = self.polygons[i]
         positive_vertices = [
             (points_flat[j], points_flat[j + 1]) for j in range(0, len(points_flat), 2)
         ]
@@ -187,40 +188,84 @@ class Heatmap:
         return 1
 
 
-class EfficientArray:
-    """Efficient storage for a jagged array of unsigned integers."""
+class EfficientArray(Sequence[array.array]):
+    """Jagged array of unsigned int rows (variable-length ``array.array`` per index).
 
-    def __init__(self):
-        self.offset_array = array.array("I")
+    ``offset_array`` has length *n* + 1 for *n* rows: row *i* is
+    ``values_array[offset_array[i] : offset_array[i + 1]]``.
+    The row count is *n* (``len(offset_array) - 1``), not ``len(values_array)``
+    (that is the total flat element count across all rows).
+
+    Invariant after each ``add_values``: ``offset_array[-1] == len(values_array)``.
+    """
+
+    def __init__(self) -> None:
+        self.offset_array = array.array("I", [0])
         self.values_array = array.array("I")
-        self._cur_offset = 0
-        self.offset_array.append(0)
 
     def add_values(self, values) -> None:
-        """Append a group of values as a new entry."""
-        offset = self.offset_array[self._cur_offset]
+        """Append a group of values as a new row."""
+        offset_start = len(self.values_array)
         self.values_array.extend(values)
-        self._cur_offset += 1
-        self.offset_array.append(offset + len(values))
+        self.offset_array.append(offset_start + len(values))
 
-    def get_values(self, i: int) -> array.array:
-        """Retrieve the *i*-th entry from the jagged array."""
-        if i >= self._cur_offset:
-            raise IndexError(
-                f"Index {i} out of range for EfficientArray of length {self._cur_offset}"
+    def __getitem__(self, index: int | slice) -> array.array | list[array.array]:
+        # n rows ⇒ n+1 cumulative offsets (offset_array[0] is always 0).
+        n_rows = len(self.offset_array) - 1
+
+        def row(row_index: int) -> array.array:
+            i = row_index + n_rows if row_index < 0 else row_index
+            if i < 0 or i >= n_rows:
+                raise IndexError(
+                    f"EfficientArray index {row_index} out of range (length {n_rows})"
+                )
+            offset_start = self.offset_array[i]
+            offset_end = self.offset_array[i + 1]
+            return self.values_array[offset_start:offset_end]
+
+        if isinstance(index, slice):
+            return [row(j) for j in range(*index.indices(n_rows))]
+        if not isinstance(index, int):
+            raise TypeError(
+                f"EfficientArray indices must be int or slice, not {type(index).__name__}"
             )
-        start = self.offset_array[i]
-        end = self.offset_array[i + 1]
-        return self.values_array[start:end]
+        return row(index)
 
-    def __len__(self):
-        return self._cur_offset
+    def __len__(self) -> int:
+        return len(self.offset_array) - 1
 
 
 # Types
+class TileRange(NamedTuple):
+    """Inclusive tile indices on the slide grid for an item bounding box.
+
+    Used when binning points (masks, density lookups) and polygons
+    (polygon container); not specific to either.
+    """
+
+    x_start: int
+    y_start: int
+    x_end: int
+    y_end: int
+
+
 Items = Points | Polygons | Heatmap
 
-# Single item
-Point = list[int]  # Of len == 2
-Polygon = dict[str, Points]  # With str == "positiveVertices" | "negativeVertices"
+# One element when iterating ``Points`` (an ``(x, y)`` pair in slide coordinates).
+Point = tuple[int, int]
+
+
+class Polygon(TypedDict):
+    """One polygon row in SlideScore wire shape (same as :meth:`Polygons.__getitem__`).
+
+    Not to be confused with :class:`Polygons`, which holds many polygons.
+    """
+
+    positiveVertices: list[tuple[float, float]]
+    negativeVerticesArr: list[int] | None
+
+
+# Flat ``[x1, y1, x2, y2, ...]`` for omega / tile polygon encoding (unsigned ints).
+FlatPolygonCoords = list[int]
+
 Item = Point | Polygon

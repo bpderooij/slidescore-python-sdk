@@ -5,26 +5,127 @@ import logging
 import math
 import tarfile
 import zipfile
+from collections.abc import Iterable
+from typing import cast
 
 import brotli
 import msgpack
 
-from .containers import Heatmap, Item, Items, Points, Polygons
+from .containers import Heatmap, Item, Items, Points, Polygon, Polygons, TileRange
 from ._image_utils import encode_png, _points_to_png, lookup_table_to_png
 from ._polygon_container import PolygonContainer
 from ._serializers import msgpack_encoder
 
 _logger = logging.getLogger(__name__)
 
+# Default heuristics: single numbers here, mirrored on ``Encoder`` as class
+# attributes so callers can patch ``_encoder._FEW_POINTS_JSON_CUTOFF`` (etc.)
+# or ``Encoder.few_points_json_cutoff``. Reassigning a module constant after
+# ``Encoder`` is defined does not change existing class attributes; set the
+# class attribute, or patch constants before import / define a subclass.
+DEFAULT_BIG_POLYGON_SIZE_CUTOFF = 10_000
+_FEW_POINTS_JSON_CUTOFF = 500_000
+_LOW_DENSITY_POINTS_PER_TILE = 30
+_LOOKUP_TABLE_TILE_SIZES: tuple[int, ...] = (32, 256)
+_POLYGON_LOOKUP_WEIGHT = 15
+
+
+def _bounding_box(
+    vertices: list[tuple[float, float]],
+) -> tuple[float, float, float, float]:
+    min_x = min(vertex[0] for vertex in vertices)
+    min_y = min(vertex[1] for vertex in vertices)
+    max_x = max(vertex[0] for vertex in vertices)
+    max_y = max(vertex[1] for vertex in vertices)
+    return min_x, min_y, max_x, max_y
+
+
+def _bounding_box_area(
+    min_x: float, min_y: float, max_x: float, max_y: float
+) -> float:
+    return (max_x - min_x) * (max_y - min_y)
+
+
+def _tile_range_for_bounds(
+    min_x: float, min_y: float, max_x: float, max_y: float, tile_size: int
+) -> TileRange:
+    return TileRange(
+        x_start=math.floor(min_x / tile_size),
+        y_start=math.floor(min_y / tile_size),
+        x_end=math.floor(max_x / tile_size),
+        y_end=math.floor(max_y / tile_size),
+    )
+
+
+def _points_anno1_json(point_coordinates: Iterable[tuple[int, int]]) -> str:
+    return json.dumps([{"x": cx, "y": cy} for cx, cy in point_coordinates])
+
+
+def _add_to_tar(tar: tarfile.TarFile, buffer: bytes, name: str) -> None:
+    info = tarfile.TarInfo(name=name)
+    info.size = len(buffer)
+    tar.addfile(info, io.BytesIO(buffer))
+
+
+def _add_polygon_container(
+    zf: zipfile.ZipFile, container: PolygonContainer, dir_name: str
+) -> None:
+    tile_polygons_i_bytes = msgpack.dumps(
+        container.all_tiles, default=msgpack_encoder
+    )
+    zf.writestr(
+        f"{dir_name}/tile_polygons_i.msgpack.br",
+        brotli.compress(tile_polygons_i_bytes, quality=8),
+    )
+
+    big_tile_polygons_i_bytes = msgpack.dumps(
+        container.big_tiles, default=msgpack_encoder
+    )
+    zf.writestr(
+        f"{dir_name}/big_tile_polygons_i.msgpack.br",
+        brotli.compress(big_tile_polygons_i_bytes, quality=8),
+    )
+
+    zf.writestr(
+        f"{dir_name}/encoded_polygons.bin.br",
+        brotli.compress(container.encode_polygons(), quality=8),
+    )
+    zf.writestr(
+        f"{dir_name}/simpl_encoded_polygons.bin.br",
+        brotli.compress(container.encode_simplified_polygons(), quality=8),
+    )
+    zf.writestr(
+        f"{dir_name}/negative_polygons.json",
+        json.dumps(container.polygons.negative_polygons_i, indent=2).encode(),
+    )
+
 
 class Encoder:
-    """Encode Points, Polygons, or Heatmap into an Anno2 ZIP archive."""
+    """Encode Points, Polygons, or Heatmap into an Anno2 ZIP archive.
 
-    big_polygon_size_cutoff = 100 * 100  # bounding-box area threshold for "big" polygons
-    few_points_cutoff = 500 * 1000
-    low_density_cutoff = 30  # points per 256×256 tile below which JSON is preferred
+    Orchestrates tiling, lookup tables, and ZIP layout. Pure geometry,
+    wire-format helpers, and zip/tar serialization live at module level
+    (e.g. ``_bounding_box``, ``_add_polygon_container``).
 
-    def __init__(self, items: Items, big_polygon_size_cutoff: int = 100 * 100) -> None:
+    Parameters
+    ----------
+    items
+        Points, polygons, or heatmap to encode.
+    big_polygon_size_cutoff
+        Axis-aligned bounding-box area above which a polygon is stored as
+        "big" in the tile index.
+    """
+
+    few_points_json_cutoff: int = _FEW_POINTS_JSON_CUTOFF
+    low_density_points_per_tile: int = _LOW_DENSITY_POINTS_PER_TILE
+    lookup_table_tile_sizes: tuple[int, ...] = _LOOKUP_TABLE_TILE_SIZES
+    polygon_lookup_weight: int = _POLYGON_LOOKUP_WEIGHT
+
+    def __init__(
+        self,
+        items: Items,
+        big_polygon_size_cutoff: int = DEFAULT_BIG_POLYGON_SIZE_CUTOFF,
+    ) -> None:
         self.items = items
         self.big_polygon_size_cutoff = big_polygon_size_cutoff
         self._data_items: dict = {"numItems": len(items)}
@@ -64,40 +165,16 @@ class Encoder:
                 len(items.matrix[0]),
             )
 
-    def _bounding_box(self, item: Item) -> tuple[float, float, float, float]:
-        """Return (min_x, min_y, max_x, max_y) for a point or polygon."""
+    def _item_bounding_box(self, item: Item) -> tuple[float, float, float, float]:
+        """Return (min_x, min_y, max_x, max_y) for a point or polygon item."""
         if isinstance(self.items, Points):
-            vertices = [item]
-        else:
-            vertices = item["positiveVertices"]
-
-        min_x = min(p[0] for p in vertices)
-        min_y = min(p[1] for p in vertices)
-        max_x = max(p[0] for p in vertices)
-        max_y = max(p[1] for p in vertices)
-        return min_x, min_y, max_x, max_y
-
-    def _tile_range(
-        self, min_x: float, min_y: float, max_x: float, max_y: float, tile_size: int
-    ) -> dict:
-        return {
-            "x": {
-                "start": math.floor(min_x / tile_size),
-                "end": math.floor(max_x / tile_size),
-            },
-            "y": {
-                "start": math.floor(min_y / tile_size),
-                "end": math.floor(max_y / tile_size),
-            },
-        }
+            x, y = cast(tuple[int, int], item)
+            return _bounding_box([(float(x), float(y))])
+        polygon_item = cast(Polygon, item)
+        return _bounding_box(polygon_item["positiveVertices"])
 
     def _polygon_bbox_area(self, item: Item) -> float:
-        min_x, min_y, max_x, max_y = self._bounding_box(item)
-        return (max_x - min_x) * (max_y - min_y)
-
-    def _tiles_for_item(self, item: Item, tile_size: int) -> dict:
-        min_x, min_y, max_x, max_y = self._bounding_box(item)
-        return self._tile_range(min_x, min_y, max_x, max_y, tile_size)
+        return _bounding_box_area(*self._item_bounding_box(item))
 
     def generate_tile_data(self, tile_size: int = 256) -> None:
         """Bin items into tiles and store the result in ``_data_items``."""
@@ -112,13 +189,17 @@ class Encoder:
             )
 
     def _bin_points_into_tiles(self, tile_size: int):
-        items = self.items
-        are_few_points = len(items) < self.few_points_cutoff
-        is_points = items.name == "points"
+        items = cast(Points, self.items)
 
-        if are_few_points and is_points:
-            _logger.debug("Detected few points (%s), saving anno1 JSON", len(items))
-            return json.dumps([{"x": x, "y": y} for x, y in items])
+        if len(items) < self.few_points_json_cutoff and items.name == "points":
+            _logger.info(
+                "Anno2 points layer: count %s < few_points_json_cutoff (%s) — "
+                "using anno1 JSON (anno1_points.json.br), not tiled mask PNGs; "
+                "SlideScore still shows these as normal point annotations.",
+                len(items),
+                self.few_points_json_cutoff,
+            )
+            return _points_anno1_json(items)
 
         tile_bins: dict = {}
         num_tiles = 0
@@ -136,12 +217,15 @@ class Encoder:
             tile_bins[tile_y][tile_x].extend((img_x % tile_size, img_y % tile_size))
 
         num_points_per_tile = len(items) / num_tiles
-        if num_points_per_tile < self.low_density_cutoff and is_points:
-            _logger.debug(
-                "Detected low density of points (%s / tile), saving anno1 JSON",
-                round(num_points_per_tile),
+        if num_points_per_tile < self.low_density_points_per_tile and items.name == "points":
+            _logger.info(
+                "Anno2 points layer: mean %.1f points/tile < low_density_points_per_tile "
+                "(%s) — using anno1 JSON (anno1_points.json.br), not tiled mask PNGs; "
+                "SlideScore still shows these as normal point annotations.",
+                num_points_per_tile,
+                self.low_density_points_per_tile,
             )
-            return json.dumps([{"x": x, "y": y} for x, y in items])
+            return _points_anno1_json(items)
 
         _logger.debug(
             "Compressing tiles as PNGs: %s tiles, %s points, %.1f pts/tile",
@@ -162,9 +246,13 @@ class Encoder:
         tile_bins = PolygonContainer(tile_size, items)
 
         for i, polygon in enumerate(items):
-            is_big = self._polygon_bbox_area(polygon) > self.big_polygon_size_cutoff
-            tile_range = self._tiles_for_item(polygon, tile_size)
-            tile_bins.store_polygon_i(i, tile_range, is_big)
+            is_big = (
+                self._polygon_bbox_area(polygon) > self.big_polygon_size_cutoff
+            )
+            tile_indices = _tile_range_for_bounds(
+                *self._item_bounding_box(polygon), tile_size
+            )
+            tile_bins.store_polygon_i(i, tile_indices, is_big)
 
         return tile_bins
 
@@ -174,11 +262,19 @@ class Encoder:
             _logger.debug("Skipping lookup table generation for heatmap")
             return
 
-        if len(self.items) < self.few_points_cutoff and self.items.name == "points":
-            _logger.debug("Skipping lookup table generation for few points")
+        if (
+            len(self.items) < self.few_points_json_cutoff
+            and self.items.name == "points"
+        ):
+            _logger.debug(
+                "Skipping density lookup PNGs: points count %s < few_points_json_cutoff "
+                "(%s) with name=points (anno1 JSON layer has no mask.tar.gz to index).",
+                len(self.items),
+                self.few_points_json_cutoff,
+            )
             return
 
-        for tile_size in [32, 256]:
+        for tile_size in self.lookup_table_tile_sizes:
             fast_path = next(
                 (
                     d
@@ -201,19 +297,23 @@ class Encoder:
 
     def _bin_lookup(self, tile_size: int) -> dict:
         items = self.items
-        num_points_to_add = 1 if isinstance(items, Points) else 15
+        num_points_to_add = (
+            1 if isinstance(items, Points) else self.polygon_lookup_weight
+        )
 
         tile_bins: dict = {}
         data = {"tile_size": tile_size, "lookup": tile_bins, "maxValue": 0}
 
-        for i, item in enumerate(items):
+        for item in items:
             if isinstance(items, Polygons):
                 if self._polygon_bbox_area(item) > self.big_polygon_size_cutoff:
                     continue
 
-            tile_range = self._tiles_for_item(item, tile_size)
-            for y in range(tile_range["y"]["start"], tile_range["y"]["end"] + 1):
-                for x in range(tile_range["x"]["start"], tile_range["x"]["end"] + 1):
+            tile_indices = _tile_range_for_bounds(
+                *self._item_bounding_box(item), tile_size
+            )
+            for y in range(tile_indices.y_start, tile_indices.y_end + 1):
+                for x in range(tile_indices.x_start, tile_indices.x_end + 1):
                     if y not in tile_bins:
                         tile_bins[y] = {}
                     if x not in tile_bins[y]:
@@ -276,7 +376,12 @@ class Encoder:
                     with tarfile.open(fileobj=tar_gz_fh, mode="w:gz") as tar:
                         for tile_y, row in self._data_items["masks"].items():
                             for tile_x, tile_png_bytes in row.items():
-                                _add_to_tar(tar, tile_png_bytes, f"tile_x{tile_x}_y{tile_y}.png")
+                                _add_to_tar(
+                                    tar,
+                                    tile_png_bytes,
+                                    f"tile_x{tile_x}_y{tile_y}.png",
+                                )
+
                     zf.writestr("masks.tar.gz", tar_gz_fh.getbuffer())
                 else:
                     zf.writestr(
@@ -294,7 +399,9 @@ class Encoder:
                 )
 
             if "polygonContainer" in self._data_items:
-                _add_polygon_container(zf, self._data_items["polygonContainer"], "polygon_container")
+                _add_polygon_container(
+                    zf, self._data_items["polygonContainer"], "polygon_container"
+                )
 
             if isinstance(self.items, Polygons) and len(self.items.labels) > 0:
                 zf.writestr(
@@ -312,38 +419,3 @@ class Encoder:
     def add_metadata(self, metadata: dict) -> None:
         """Set user metadata to include in the output ZIP."""
         self.user_metadata = metadata
-
-
-def _add_polygon_container(zf: zipfile.ZipFile, container: PolygonContainer, dir_name: str) -> None:
-    """Encode a PolygonContainer and write its members into *zf*."""
-    tile_polygons_i_bytes = msgpack.dumps(container.all_tiles, default=msgpack_encoder)
-    zf.writestr(
-        f"{dir_name}/tile_polygons_i.msgpack.br",
-        brotli.compress(tile_polygons_i_bytes, quality=8),
-    )
-
-    big_tile_polygons_i_bytes = msgpack.dumps(container.big_tiles, default=msgpack_encoder)
-    zf.writestr(
-        f"{dir_name}/big_tile_polygons_i.msgpack.br",
-        brotli.compress(big_tile_polygons_i_bytes, quality=8),
-    )
-
-    zf.writestr(
-        f"{dir_name}/encoded_polygons.bin.br",
-        brotli.compress(container.encode_polygons(), quality=8),
-    )
-    zf.writestr(
-        f"{dir_name}/simpl_encoded_polygons.bin.br",
-        brotli.compress(container.encode_simplified_polygons(), quality=8),
-    )
-    zf.writestr(
-        f"{dir_name}/negative_polygons.json",
-        json.dumps(container.polygons.negative_polygons_i, indent=2).encode(),
-    )
-
-
-def _add_to_tar(tar: tarfile.TarFile, buffer: bytes, name: str) -> None:
-    """Add a bytes buffer to a tar archive under *name*."""
-    info = tarfile.TarInfo(name=name)
-    info.size = len(buffer)
-    tar.addfile(info, io.BytesIO(buffer))

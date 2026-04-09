@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .containers import Heatmap, Points, Polygons
-from ._encoder import Encoder
+from ._encoder import DEFAULT_BIG_POLYGON_SIZE_CUTOFF, Encoder
 from ._decoder import Decoder, items_to_anno1, items_to_geojson, write_items_tsv, write_items_png
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ def encode(
     *,
     metadata: dict | None = None,
     tile_size: int = 256,
-    big_polygon_size_cutoff: int = 100 * 100,
+    big_polygon_size_cutoff: int = DEFAULT_BIG_POLYGON_SIZE_CUTOFF,
 ) -> None:
     """Encode annotation items to an Anno2 ZIP file.
 
@@ -45,6 +45,7 @@ def encode(
         Tile size for spatial binning (default 256).
     big_polygon_size_cutoff
         Bounding-box area threshold for "big" polygon classification.
+        Default is :data:`DEFAULT_BIG_POLYGON_SIZE_CUTOFF`.
     """
     encoder = Encoder(items, big_polygon_size_cutoff=big_polygon_size_cutoff)
     encoder.generate_tile_data(tile_size)
@@ -76,6 +77,7 @@ def decode(anno2_path: str | Path) -> Points | Polygons | Heatmap:
 __all__ = [
     "encode",
     "decode",
+    "DEFAULT_BIG_POLYGON_SIZE_CUTOFF",
     "Encoder",
     "Decoder",
     "Points",

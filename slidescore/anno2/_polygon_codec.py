@@ -9,13 +9,11 @@ import array
 import math
 from io import BufferedWriter, BytesIO
 
-from .containers import EfficientArray, Polygons
+from .containers import EfficientArray, FlatPolygonCoords
 from ._omega_codec import OmegaEncoder
 
-Polygon = list[int]  # Flat [x1, y1, x2, y2, ...]
 
-
-def encode_polygon(polygon: Polygon, tile_size: int):
+def encode_polygon(polygon: FlatPolygonCoords, tile_size: int):
     """Encode flat vertices into tile jumps + byte remainders.
 
     Since remainders are stored as raw bytes, *tile_size* must not exceed 256.
@@ -51,7 +49,7 @@ def encode_polygon(polygon: Polygon, tile_size: int):
     return x_jumps, y_jumps, num_points_in_tile, remainders
 
 
-def _max_tile_rows_cols(polygon: Polygon, tile_size: int) -> tuple[int, int]:
+def _max_tile_rows_cols(polygon: FlatPolygonCoords, tile_size: int) -> tuple[int, int]:
     """Return (num_rows, num_cols) needed to cover all points in *polygon*."""
     max_x, max_y = 0, 0
     for i in range(0, len(polygon), 2):
@@ -60,8 +58,8 @@ def _max_tile_rows_cols(polygon: Polygon, tile_size: int) -> tuple[int, int]:
     return math.ceil(max_y / tile_size), math.ceil(max_x / tile_size)
 
 
-def concat_polygons(polygons: EfficientArray):
-    """Extract per-polygon lengths and the combined flat coordinate array."""
+def _polygon_lengths_and_flat_vertices(polygons: EfficientArray):
+    """Per-polygon vertex counts (from offset gaps) and the flat ``values_array``."""
     polygon_lengths = array.array("I")
     offsets = polygons.offset_array
     for i in range(1, len(offsets)):
@@ -105,7 +103,7 @@ def _dump_to_stream(
 
 def polygons_to_bytes(polygons: EfficientArray, tile_size: int = 256) -> bytes:
     """Encode an ``EfficientArray`` of polygons into a binary blob."""
-    polygon_lengths, combined = concat_polygons(polygons)
+    polygon_lengths, combined = _polygon_lengths_and_flat_vertices(polygons)
     num_rows, num_cols = _max_tile_rows_cols(combined, tile_size)
     encoded = encode_polygon(combined, tile_size)
 

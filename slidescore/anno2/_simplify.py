@@ -82,11 +82,11 @@ def simplify(points: array.array, tolerance: float = 1.0) -> array.array:
 
 
 def simplify_polygons(polygons_arr, tolerance: float = 1.0):
+    # Local import: ``containers`` imports this module at load time.
     from .containers import EfficientArray
 
     result = EfficientArray()
-    for i in range(len(polygons_arr)):
-        polygon = polygons_arr.get_values(i)
+    for polygon in polygons_arr:
         result.add_values(simplify(polygon, tolerance))
     assert len(polygons_arr) == len(result)
     return result
