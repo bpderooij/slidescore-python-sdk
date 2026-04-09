@@ -92,7 +92,7 @@ class Polygons(Sequence):
 class Heatmap:
     """Stores an x/y/value heatmap as a 2-D matrix of unsigned bytes."""
 
-    matrix: list
+    matrix: list[array.array]
     x_offset: int
     y_offset: int
     size_per_pixel: int
@@ -100,7 +100,7 @@ class Heatmap:
 
     def __init__(
         self,
-        data: list,
+        data: Sequence[Sequence[int]],
         x_offset: int,
         y_offset: int,
         size_per_pixel: int,
@@ -143,11 +143,14 @@ class Heatmap:
         return [array.array("B", [0] * num_cols) for _ in range(num_rows)]
 
     @staticmethod
-    def _copy_matrix(source, target) -> None:
-        """Copy *source* into the top-left corner of *target*."""
-        for i in range(len(source)):
-            for j in range(len(source[0])):
-                target[i][j] = source[i][j]
+    def _copy_matrix(
+        source: Sequence[Sequence[int]],
+        target: list[array.array],
+    ) -> None:
+        """Copy *source* into *target* row-wise (``__init__`` or ``set_point`` grow)."""
+        for i, row in enumerate(source):
+            ub = row if isinstance(row, array.array) and row.typecode == "B" else array.array("B", row)
+            target[i][: len(ub)] = ub
 
     @classmethod
     def from_numpy(
