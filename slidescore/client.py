@@ -108,8 +108,8 @@ class APIClient:
         Swagger documents parameters ``in: query``; the API introduction also
         allows the same keys in the form body. We send:
 
-        * **GET** — query string only (``params``).
-        * **POST** — query string (``params``) plus optional form body (``data``).
+        * **GET** -- query string only (``params``).
+        * **POST** -- query string (``params``) plus optional form body (``data``).
 
         Query and form keys follow the usual Swagger **camelCase** names
         (e.g. ``imageId``, ``caseId``, ``studyId``).
@@ -174,7 +174,7 @@ class APIClient:
         return response
 
     # ------------------------------------------------------------------ #
-    # Forwarding methods — logic lives in api/ modules                     #
+    # Forwarding methods -- logic lives in api/ modules                     #
     # ------------------------------------------------------------------ #
 
     def get_studies(self) -> JSONValue:

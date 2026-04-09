@@ -111,7 +111,7 @@ def upload_attachment(
     new_filename = body["filename"]
     att_id = body["attId"]
 
-    # Import here to avoid circular dependency — client.py imports from api/
+    # Import here to avoid circular dependency -- client.py imports from api/
     from ..client import APIClient as _APIClient
 
     attachment_client = _APIClient(base_url, temp_api_token)

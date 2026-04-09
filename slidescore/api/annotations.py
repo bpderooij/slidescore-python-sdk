@@ -136,7 +136,7 @@ def convert_to_anno2(
 
     .. note::
         This is a thin wrapper around :func:`slidescore.anno2.encode`.
-        The *client* parameter is unused — encoding is purely local.
+        The *client* parameter is unused -- encoding is purely local.
     """
     items_encoder: Points | Polygons | Heatmap
     if isinstance(items, (Points, Polygons, Heatmap)):

@@ -66,7 +66,7 @@ def main(argv=None):
             f"Anno2 @ {anno2_path} is not a zipfile, and could therefore not be a Anno2 file. Please check your input"
         )
     anno2 = zipfile.ZipFile(anno2_path)
-    decoder = Decoder(anno2, args.verbose)
+    decoder = Decoder(anno2)
     decoder.decode()
     logger.info("Decoded items succesfully, saving to disk")
     decoder.dump_to_file(output_path)

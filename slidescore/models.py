@@ -52,7 +52,7 @@ class SlideScoreResult:
     ``answer`` may be empty or omitted; TMA fields must be complete if any is set.
 
     **Parsed ``answer`` (optional):** SlideScore stores shape answers as a single
-    JSON string in ``answer``—either AnnoShapes-style dicts (each has a
+    JSON string in ``answer`` -- either AnnoShapes-style dicts (each has a
     ``type`` key) or a flat list of ``{x,y}`` objects for AnnoPoints. When
     ``parse_answer_json`` is true, that string is copied into :attr:`annotations`
     or :attr:`points` so callers can branch without re-parsing. Upload and TSV

@@ -1,4 +1,13 @@
+"""Anno2 ZIP decoder.
+
+Decodes Anno2 archives into ``Points``, ``Polygons``, or ``Heatmap`` objects.
+Polygon decoding adapted from slideforge-dev ``anno2_geometries.py``.
+"""
+
+from __future__ import annotations
+
 import array
+import io
 import json
 import logging
 import os
@@ -14,573 +23,351 @@ from packaging import version
 
 from ._image_utils import encode_png
 from ._omega_codec import OmegaEncoder
-
 from .containers import Heatmap, Items, Points, Polygons
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
+
+_SUPPORTED_TYPES = {"polygons", "points", "mask", "heatmap", "binary-heatmap"}
+
+
+# ---------------------------------------------------------------------------
+# Low-level binary helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_omega_ints(stream: io.BytesIO, encoding_type: str) -> list[int]:
+    """Read a length-prefixed omega-encoded integer array from a stream."""
+    num_bytes = int.from_bytes(stream.read(4), "little")
+    raw = stream.read(num_bytes)
+    bits = bitarray()
+    bits.frombytes(raw)
+    return OmegaEncoder().decode(bits, encoding_type)
+
+
+def _decode_polygon_blob(data: bytes) -> Polygons:
+    """Decode ``encoded_polygons.bin`` payload (after brotli) into a Polygons object."""
+    stream = io.BytesIO(data)
+    tile_size = int.from_bytes(stream.read(4), "little")
+    stream.read(4)  # num_rows (unused)
+    stream.read(4)  # num_cols (unused)
+
+    polygon_lengths_nbytes = int.from_bytes(stream.read(4), "little")
+    polygon_lengths = array.array("I")
+    polygon_lengths.frombytes(stream.read(polygon_lengths_nbytes))
+
+    x_jumps = _read_omega_ints(stream, "integers")
+    y_jumps = _read_omega_ints(stream, "integers")
+    num_points_in_tile = _read_omega_ints(stream, "naturalOnly")
+
+    # Clamp to shortest array -- omega padding can produce trailing values
+    num_jumps = min(len(x_jumps), len(y_jumps))
+    x_jumps = x_jumps[:num_jumps]
+    y_jumps = y_jumps[:num_jumps]
+    num_segments = min(num_jumps, len(num_points_in_tile))
+    num_points_in_tile = num_points_in_tile[:num_segments]
+
+    remainders_nbytes = int.from_bytes(stream.read(4), "little")
+    remainders = list(stream.read(remainders_nbytes))
+
+    # Reconstruct flat coordinate list from tile jumps + remainders
+    tile_x = 0
+    tile_y = 0
+    remainder_idx = 0
+    flat: list[int] = []
+
+    for num_points, dx, dy in zip(num_points_in_tile, x_jumps, y_jumps):
+        if remainder_idx >= len(remainders):
+            break
+        tile_x += dx
+        tile_y += dy
+        points_left = (len(remainders) - remainder_idx) // 2
+        num_to_take = min(num_points, points_left)
+        for _ in range(num_to_take):
+            remainder_x = remainders[remainder_idx]
+            remainder_y = remainders[remainder_idx + 1]
+            remainder_idx += 2
+            flat.append(tile_x * tile_size + remainder_x)
+            flat.append(tile_y * tile_size + remainder_y)
+
+    # Split flat coords into individual polygons using polygon_lengths
+    polygons = Polygons()
+    offset = 0
+    for length in polygon_lengths:
+        chunk = flat[offset : offset + int(length)]
+        offset += int(length)
+        if chunk:
+            polygons.addPolygon(chunk)
+    return polygons
+
+
+def _decode_mask_png(png_buf: bytes) -> tuple[int, list[tuple[int, int]]]:
+    """Decode a 1-bit mask PNG into (tile_size, [(x, y), ...])."""
+    reader = png.Reader(bytes=png_buf)
+    width, _height, rows, info = reader.read()
+    points = []
+    if info["bitdepth"] == 1:
+        for row_i, row in enumerate(rows):
+            for x, b in enumerate(row):
+                if b != 0:
+                    points.append((x, row_i))
+    return width, points
+
+
+def _decode_heatmap_png(png_buf: bytes) -> tuple[int, int, list[list[int]]]:
+    """Decode a greyscale PNG into (width, height, matrix)."""
+    reader = png.Reader(bytes=png_buf)
+    width, height, rows, _info = reader.read()
+    matrix = [list(row) for row in rows]
+    return width, height, matrix
+
+
+# ---------------------------------------------------------------------------
+# Decoder class
+# ---------------------------------------------------------------------------
 
 
 class Decoder:
-    """Encompassing class to decode Anno2"""
+    """Decode an Anno2 ZIP archive into Points, Polygons, or Heatmap."""
 
-    supported_types = [
-        "polygons",
-        "points",
-        "mask",
-        "heatmap",
-        "binary-heatmap",
-    ]  # mask is processed the same way as points, heatmap and binary-heatmap too
-    anno2_version = version.parse("0.0.0")
-    anno2_type = ""
-    system_metadata = None
-    items: Items = None
-
-    def __init__(self, anno2: zipfile.ZipFile, verbosity=0) -> None:
-        """Initialize decoder with a Anno2 zipfile, checking if we can convert it"""
+    def __init__(self, anno2: zipfile.ZipFile) -> None:
         self.anno2 = anno2
-        self._check_if_compatible_anno2()
-        logger.info(
-            "Loaded Anno2 (v%s, type=%s, numItems=%s)",
-            self.anno2_version,
-            self.system_metadata["type"],
-            self.system_metadata["numItems"],
-        )
+        self.system_metadata: dict = {}
+        self.anno2_type: str = ""
+        self.items: Items | None = None
+        self._read_system_metadata()
 
-    def _check_if_compatible_anno2(self):
-        """Also loads anno2_version & system_metadata"""
+    def _read_system_metadata(self) -> None:
         try:
-            with self.anno2.open("system_metadata.json") as f:
-                logger.debug("Detected system_metadata.json exists in the zip!")
-                self.system_metadata = json.load(f)
-
-                # Check version
-                ver_str = self.system_metadata["version"]
-                v = version.parse(ver_str)
-                self.anno2_version = v
-                # Check if version is below 1.0.0
-                if v >= version.parse("1.0.0"):
-                    raise ValueError(f"Anno2 version {ver_str} must be below 1.0.0")
-
-                # Log a warning if version is not exactly 0.2.0
-                if v != version.parse("0.2.0"):
-                    logger.warning(
-                        f"Version {ver_str} is not exactly 0.2.0, contineuing on the presumption the anno2 file is compatible"
-                    )
-
-                # Check the type
-                self.anno2_type = self.system_metadata["type"]
-                if self.anno2_type not in self.supported_types:
-                    raise ValueError(
-                        f"Anno2 type '{self.anno2_type}' not in supported types {self.supported_types}"
-                    )
+            raw = self.anno2.read("system_metadata.json")
         except KeyError:
-            raise Exception(
-                "Could not detect system_metadata.json in the Anno2 Zipfile, please check your input"
+            raise ValueError("Anno2 ZIP missing system_metadata.json")
+
+        self.system_metadata = json.loads(raw)
+        ver_str = self.system_metadata["version"]
+        v = version.parse(ver_str)
+        if v >= version.parse("1.0.0"):
+            raise ValueError(f"Anno2 version {ver_str} must be below 1.0.0")
+        if v != version.parse("0.2.0"):
+            _logger.warning("Anno2 version %s is not 0.2.0, assuming compatible", ver_str)
+
+        self.anno2_type = self.system_metadata["type"]
+        if self.anno2_type not in _SUPPORTED_TYPES:
+            raise ValueError(
+                f"Anno2 type '{self.anno2_type}' not in {_SUPPORTED_TYPES}"
             )
 
-    def decode(self):
-        """Decodes the zip in `self.anno2` into `self.items`. The items will have a `Polygons`, `Points` or `Heatmap` type.
-        Also checks if the number of items is expected."""
-        logger.debug("Starting decode")
+    def decode(self) -> None:
+        """Decode the archive into ``self.items``."""
         if self.anno2_type == "polygons":
             self.items = self._decode_polygons()
-        elif self.anno2_type == "points" or self.anno2_type == "mask":
+        elif self.anno2_type in ("points", "mask"):
             self.items = self._decode_points()
-        elif self.anno2_type == "heatmap" or self.anno2_type == "binary-heatmap":
+        elif self.anno2_type in ("heatmap", "binary-heatmap"):
             self.items = self._decode_heatmap()
         else:
-            raise TypeError(f"Anno2 type {self.anno2_type=} not recognized")
+            raise TypeError(f"Unrecognised anno2 type: {self.anno2_type!r}")
 
-        assert self.items is not None
+        expected = self.system_metadata.get("numItems")
+        if isinstance(expected, int) and expected != len(self.items):
+            _logger.warning(
+                "Item count mismatch: expected %d, got %d", expected, len(self.items)
+            )
 
-        if type(self.system_metadata["numItems"]) is int:
-            if self.system_metadata["numItems"] == len(self.items):
-                logger.info(
-                    "Decoded anno2 had the correct number of items (%s)",
-                    len(self.items),
-                )
-            else:
-                logger.warning(
-                    f"Decoded anno2 had an unexpected number of items (expected {self.system_metadata['numItems']} != got {len(self.items)})"
-                )
-        else:
-            logger.debug("Could not verify the numItems because it is not an int")
+    # -- Type-specific decoders ---------------------------------------------
 
-        logger.debug("End decode")
+    def _decode_polygons(self) -> Polygons:
+        # Prefer full-fidelity, fall back to simplified
+        for member in (
+            "polygon_container/encoded_polygons.bin.br",
+            "polygon_container/simpl_encoded_polygons.bin.br",
+        ):
+            if member in self.anno2.namelist():
+                raw = brotli.decompress(self.anno2.read(member))
+                return _decode_polygon_blob(raw)
+        raise ValueError("Anno2 polygon ZIP contains no encoded_polygons member")
 
-    def dump_to_file(self, path: str):
-        """Dumps the decoded items to a file on disk, file format depends on the selected extension. Supported output types differ by the input type."""
-        logger.debug("Encoding and dumping to file")
+    def _decode_points(self) -> Points:
+        points = Points()
+        if "anno1_points.json.br" in self.anno2.namelist():
+            data = json.loads(brotli.decompress(self.anno2.read("anno1_points.json.br")))
+            for pt in data:
+                points.addPoint(int(pt["x"]), int(pt["y"]))
+            return points
 
-        # Find the used output type
-        preffered_output_type = self._infer_output_type(path)
-        all_supported_output_types = {
+        # Dense mask tiles
+        if "masks.tar.gz" not in self.anno2.namelist():
+            raise ValueError(
+                "Anno2 points ZIP contains neither anno1_points.json.br nor masks.tar.gz"
+            )
+        with self.anno2.open("masks.tar.gz") as f:
+            with tarfile.open(fileobj=f, mode="r:gz") as tar:
+                for member in tar.getmembers():
+                    if not member.isfile() or not member.name.startswith("tile_"):
+                        continue
+                    extracted = tar.extractfile(member)
+                    assert extracted is not None  # guaranteed by member.isfile() check
+                    content = extracted.read()
+                    if content[:4] != b"\x89PNG":
+                        continue
+                    parts = member.name.split("_")
+                    tile_x = int(parts[1][1:])
+                    tile_y = int(parts[2][1:].removesuffix(".png"))
+                    tile_size, tile_points = _decode_mask_png(content)
+                    for x, y in tile_points:
+                        points.addPoint(tile_x * tile_size + x, tile_y * tile_size + y)
+        return points
+
+    def _decode_heatmap(self) -> Heatmap:
+        meta = json.loads(self.anno2.read("heatmap_metadata.json"))
+        x_offset = meta["x"]
+        y_offset = meta["y"]
+        size_per_pixel = meta["sizePerPixel"]
+
+        _, _, matrix = _decode_heatmap_png(self.anno2.read("heatmap.png"))
+        return Heatmap(matrix, x_offset, y_offset, size_per_pixel)
+
+    # -- Export methods (kept for backward compat with export_data CLI) ------
+
+    def dump_to_file(self, path: str) -> None:
+        """Export decoded items to file. Format inferred from extension."""
+        if self.items is None:
+            raise RuntimeError("No items decoded yet; call decode() first")
+
+        output_type = _infer_output_type(path)
+        supported = {
             Polygons: ["json", "tsv", "geojson"],
             Points: ["json", "tsv", "geojson"],
             Heatmap: ["json", "tsv", "png"],
         }
+        allowed = supported.get(type(self.items), [])
+        if output_type not in allowed:
+            output_type = allowed[0] if allowed else "json"
+            _logger.warning("Unsupported extension, falling back to %s", output_type)
 
-        # Should never happen
-        if type(self.items) not in all_supported_output_types:
-            raise ValueError(
-                f"Failed to find {type(self.items)=} among supported output types"
-            )
-
-        cur_supported_output_types = all_supported_output_types[type(self.items)]
-        if preffered_output_type in cur_supported_output_types:
-            output_type = preffered_output_type
-            logger.info(f"Was able to select {preffered_output_type} as output type")
-        else:
-            output_type = cur_supported_output_types[0]
-            logger.warning(
-                f"Was not able to select the detected preffered output type ({preffered_output_type}) as output type, using {output_type}"
-            )
-
-        # Dump the items data to the detected available output type
         if output_type == "json":
-            anno1_obj = self._items_to_anno1_obj()
-            with open(path, "w") as output_fh:
-                json.dump(anno1_obj, output_fh)
+            with open(path, "w") as file:
+                json.dump(items_to_anno1(self.items), file)
         elif output_type == "tsv":
-            with open(path, "w") as output_fh:
-                self._write_items_to_tsv(output_fh)
+            with open(path, "w") as file:
+                write_items_tsv(self.items, file)
         elif output_type == "geojson":
-            anno1_obj = self._items_to_geojson_obj()
-            with open(path, "w") as output_fh:
-                json.dump(anno1_obj, output_fh)
+            with open(path, "w") as file:
+                json.dump(items_to_geojson(self.items), file)
         elif output_type == "png":
-            with open(path, "wb") as output_fh:
-                self._write_items_to_png(output_fh)
+            with open(path, "wb") as file:
+                write_items_png(self.items, file)
 
-        logger.info(f"Dumped {type(self.items)=} to {path=}")
+    def dump_user_metadata_to_file(self, path: str) -> None:
+        """Write user_metadata.json to disk."""
+        with open(path, "wb") as file:
+            file.write(self.anno2.read("user_metadata.json"))
 
-    def dump_user_metadata_to_file(self, path: str):
-        """Dumps the user supplied metadata to a file on disk."""
-        logger.debug("Dumping user_metadata.json")
 
-        with self.anno2.open("user_metadata.json") as input_fh:
-            with open(path, "wb") as output_fh:
-                output_fh.write(input_fh.read())
+# ---------------------------------------------------------------------------
+# Standalone export functions
+# ---------------------------------------------------------------------------
 
-        logger.info(f"Dumped {type(self.items)=} to {path=}")
 
-    def _items_to_anno1_obj(self):
-        """Convert `self.items` into a Slide Score Anno1 Object. Always an array of Polygons, Points or [Heatmap]"""
-        if type(self.items) is Polygons:
-            timestamp = (
-                datetime.now(timezone.utc)
-                .replace(microsecond=0)
-                .isoformat()
-                .replace("+00:00", "Z")
-            )
-            anno1_object = []
-            for i in range(len(self.items)):
-                anno1_polygon = {
-                    "type": "polygon",
-                    "modifiedOn": timestamp,
-                    "points": [],
-                }
-                polygon = self.items[i]
-                for x, y in polygon["positiveVertices"]:
-                    anno1_polygon["points"].append({"x": x, "y": y})
-                anno1_object.append(anno1_polygon)
-            return anno1_object
-        elif type(self.items) is Points:
-            anno1_points = [self.items[i] for i in range(len(self.items))]
-            return anno1_points
-        elif type(self.items) is Heatmap:
-            heatmap_data = [row.tolist() for row in self.items.matrix]
-            anno1_heatmap = [
+def items_to_anno1(items: Items) -> list[dict]:
+    """Convert decoded items to Anno1 JSON structure."""
+    if isinstance(items, Polygons):
+        timestamp = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        return [
+            {
+                "type": "polygon",
+                "modifiedOn": timestamp,
+                "points": [{"x": x, "y": y} for x, y in polygon["positiveVertices"]],
+            }
+            for polygon in items
+        ]
+    if isinstance(items, Points):
+        return [{"x": x, "y": y} for x, y in items]
+    if isinstance(items, Heatmap):
+        return [
+            {
+                "x": items.x_offset,
+                "y": items.y_offset,
+                "height": len(items.matrix) * items.size_per_pixel,
+                "data": [row.tolist() for row in items.matrix],
+                "type": "heatmap",
+            }
+        ]
+    raise TypeError(f"Unsupported item type: {type(items)}")
+
+
+def write_items_tsv(items: Items, file: typing.TextIO) -> None:
+    """Write decoded items as TSV (roundtrip-compatible with encoder)."""
+    if isinstance(items, Polygons):
+        for polygon in items:
+            vertices = polygon["positiveVertices"]
+            file.write("\t".join(f"{x}\t{y}" for x, y in vertices) + "\n")
+    elif isinstance(items, Points):
+        for x, y in items:
+            file.write(f"{x}\t{y}\n")
+    elif isinstance(items, Heatmap):
+        file.write(
+            f"Heatmap {items.x_offset} {items.y_offset} {items.size_per_pixel}"
+            " # x_offset y_offset size_per_pixel\n"
+        )
+        for y, row in enumerate(items.matrix):
+            for x, val in enumerate(row):
+                if val != 0:
+                    file.write(f"{x}\t{y}\t{val}\n")
+    else:
+        raise TypeError(f"Unsupported item type: {type(items)}")
+
+
+def write_items_png(items: Items, file: typing.BinaryIO) -> None:
+    """Write heatmap items as PNG."""
+    if not isinstance(items, Heatmap):
+        raise TypeError(f"PNG export only supports Heatmap, got {type(items)}")
+    height, width = len(items.matrix), len(items.matrix[0])
+    file.write(encode_png(items.matrix, width, height, bitdepth=8))
+
+
+def items_to_geojson(items: Items) -> dict:
+    """Convert decoded items to a GeoJSON FeatureCollection."""
+    features = []
+    if isinstance(items, Polygons):
+        timestamp = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        for polygon in items:
+            coords = [list(pt) for pt in polygon["positiveVertices"]]
+            features.append(
                 {
-                    "x": self.items.x_offset,
-                    "y": self.items.y_offset,
-                    "height": len(self.items.matrix)
-                    * self.items.size_per_pixel,  # Number of rows * size per pixel is the height
-                    "data": heatmap_data,
-                    "type": "heatmap",
-                }
-            ]
-            return anno1_heatmap
-        else:
-            raise TypeError(
-                f"Type {type(self.items)} not yet implemented for conversion to Anno1"
-            )
-
-    def _write_items_to_tsv(self, fh: typing.TextIO):
-        """Converts self.items into a TSV that could be read by the Anno2 Encoder again. Should be roundtrip lossless.
-        This is the least memory intensive export option"""
-        if type(self.items) is Polygons:
-            for i in range(len(self.items)):
-                polygon = self.items[i]
-                for j in range(len(polygon["positiveVertices"])):
-                    x, y = polygon["positiveVertices"][j]
-                    is_last = j == len(polygon["positiveVertices"]) - 1
-                    fh.write(f"{x}\t{y}" + ("\t" if not is_last else ""))
-                fh.write("\n")
-        elif type(self.items) is Points:
-            for i in range(len(self.items)):
-                x, y = self.items[i]  # (x, y)
-                fh.write(f"{x}\t{y}\n")
-        elif type(self.items) is Heatmap:
-            fh.write(
-                f"Heatmap {self.items.x_offset} {self.items.y_offset} {self.items.size_per_pixel} # x_offset y_offset size_per_pixel\n"
-            )
-            for y in range(len(self.items.matrix)):
-                row = self.items.matrix[y]
-                for x in range(len(row)):
-                    val = row[x]
-                    if val != 0:
-                        fh.write(f"{x}\t{y}\t{val}\n")
-        else:
-            raise TypeError(
-                f"Type {type(self.items)} not yet implemented for conversion to TSV"
-            )
-        return None
-
-    def _write_items_to_png(self, fh: typing.BinaryIO):
-        """Converts `self.items` into a PNG file, currently only `Heatmap` supported."""
-        if type(self.items) is Heatmap:
-            height, width = len(self.items.matrix), len(self.items.matrix[0])
-            x_offset, y_offset = self.items.x_offset, self.items.y_offset
-
-            png_bytes = encode_png(self.items.matrix, width, height, bitdepth=8)
-            logger.warning(
-                f"Writing heatmap PNG without the static {x_offset=} and {y_offset=} in the image"
-            )
-            fh.write(png_bytes)
-        else:
-            raise TypeError(
-                f"Type {type(self.items)} not yet implemented for conversion to PNG"
-            )
-
-    def _items_to_geojson_obj(self):
-        """Converts `self.items` into a GeoJSON compliant FeatureCollection. `Points` and `Polygons` supported."""
-        geojson_features = []
-        geojson_object = {"type": "FeatureCollection", "features": geojson_features}
-
-        if type(self.items) is Polygons:
-            timestamp = (
-                datetime.now(timezone.utc)
-                .replace(microsecond=0)
-                .isoformat()
-                .replace("+00:00", "Z")
-            )
-
-            for i in range(len(self.items)):
-                points = []  # [[x1, y1], [x2, y2], etc...]
-                geojson_polygon = {
                     "type": "Feature",
-                    "geometry": {"type": "Polygon", "coordinates": [points]},
+                    "geometry": {"type": "Polygon", "coordinates": [coords]},
                     "properties": {
                         "exported_at": timestamp,
                         "exported_from": "slidescore-anno2",
                     },
                 }
-                polygon = self.items[i]
-
-                # We do not re-order the points to follow the right hand rule,
-                # because that order would not have been present in the original dataset
-                for x, y in polygon["positiveVertices"]:
-                    points.append([x, y])
-                geojson_features.append(geojson_polygon)
-        elif type(self.items) is Points:
-            for i in range(len(self.items)):
-                point = self.items[i]
-                geojson_point = {
+            )
+    elif isinstance(items, Points):
+        for x, y in items:
+            features.append(
+                {
                     "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [point[0], point[1]]},
+                    "geometry": {"type": "Point", "coordinates": [x, y]},
                 }
-                geojson_features.append(geojson_point)
-
-        else:
-            raise TypeError(
-                f"Type {type(self.items)} not yet implemented for conversion to GeoJSON"
             )
-        return geojson_object
+    else:
+        raise TypeError(f"GeoJSON export not supported for {type(items)}")
+    return {"type": "FeatureCollection", "features": features}
 
-    def _infer_output_type(self, path: str):
-        """
-        Parse a path and return a normalized preferred output type.
 
-        Supported:
-            - .tsv
-            - .json
-            - .png
-            - .geo.json / .geojson
-
-        Returns:
-            A string representing the normalized output type, e.g.:
-                "tsv", "json", "png", "geojson", "unknown"
-        """
-        filename = os.path.basename(path).lower()
-
-        # Handle .geo.json (two-suffix case)
-        if filename.endswith(".geo.json"):
-            return "geojson"
-
-        # Get last extension
-        ext = os.path.splitext(filename)[1]
-
-        # Normalize extension (strip leading dot)
-        ext = ext.lstrip(".")
-
-        # Map simple extensions
-        if ext in {"tsv", "json", "png", "geojson"}:
-            return ext
-
-        logger.warning(
-            f"Was not able to determine the preffered output type from the extension: '.{ext}'"
-        )
-        return "unknown"
-
-    def _decode_heatmap(self):
-        """
-        Decodes an Anno2 Heatmap into it's python object.
-        Heatmap is always encoded as a 'heatmap.png', and metadata files. heatmap_metadata.json containing: {"x": 30, "y": 30, "sizePerPixel": 12 }
-        """
-        logger.debug("Starting decode of heatmap")
-
-        with self.anno2.open("heatmap_metadata.json") as f:
-            heatmap_metadata = json.load(f)
-            x_offset = heatmap_metadata["x"]
-            y_offset = heatmap_metadata["y"]
-            size_per_pixel = heatmap_metadata["sizePerPixel"]
-
-        with self.anno2.open("heatmap.png") as f:
-            width, height, png_points = self._decode_heatmap_png(f.read())
-        heatmap = Heatmap([[]], x_offset, y_offset, size_per_pixel)
-
-        logger.debug("Setting points in heatmap object")
-        # Set a zero point in the width and height to prevent memory copies
-        heatmap.setPoint(width - 1, height - 1, 0)
-        for i in range(len(png_points)):
-            x, y, value = png_points[i]
-            heatmap.setPoint(x, y, value)
-        return heatmap
-
-    def _decode_points(self):
-        """
-        Decodes a Anno2 Points or Mask zip into a python Points object.
-        Points have 2 encoding options
-            if there are few points or the density is low,
-                a brotli encoded Anno1 JSON is simply stored
-            If there are many points a masks.tar.gz is created with tile_x{tile_x}_y{tile_y}.png files
-                this contains a black and white png with the points (aka a mask)
-        """
-        logger.debug("Starting decode of points (or mask)")
-
-        points = Points()
-        try:
-            with self.anno2.open("anno1_points.json.br") as f:
-                anno1_points_bytes: bytes = brotli.decompress(f.read())
-                anno1_points = json.loads(anno1_points_bytes)
-                for point in anno1_points:
-                    x, y = point["x"], point["y"]
-                    points.addPoint(x, y)
-            return points
-        except KeyError:
-            # if the points are stored as a mask
-            with self.anno2.open("masks.tar.gz") as f:
-                with tarfile.open(fileobj=f, mode="r:gz") as tar:
-                    for member in tar.getmembers():
-                        logger.debug(f"Name: {member.name}, Size: {member.size} bytes")
-
-                        # If you want to read the content of a file
-                        if member.isfile():
-                            file_content = tar.extractfile(member).read()
-                            if file_content[:4] == b"\x89PNG":
-                                # It's a PNG
-                                assert member.name.startswith("tile_")
-                                tile_name_parts = member.name.split("_")
-                                logger.debug(f"{tile_name_parts=}")
-                                tile_x = int(tile_name_parts[1][1:])
-                                tile_y = int(
-                                    tile_name_parts[2][1:].removesuffix(".png")
-                                )
-
-                                # tile_size should always be 256 for now, perhaps different in newer anno2 versions
-                                tile_size, png_points = self._decode_mask_png(
-                                    file_content
-                                )
-                                for x, y in png_points:
-                                    img_x = tile_x * tile_size + x
-                                    img_y = tile_y * tile_size + y
-                                    logger.debug(f"PNG point decoded: {img_x}, {img_y}")
-                                    points.addPoint(img_x, img_y)
-            return points
-
-    def _decode_polygons(self):
-        """
-        Decodes an Anno2 Polygon zip into a python Polygons object.
-        Zipfile contains
-        polygon_container/
-            big_tile_polygons_i.msgpack.br - Not needed
-            encoded_polygons.bin.br        - Contains the raw polygon coords remainders
-            negative_polygons.json         - Always empty json for now
-            simpl_encoded_polygons.bin.br  - Contains presimplified, not needed
-            tile_polygons_i.msgpack.br     - Contains the indices of polygons in the tile (256x256 px)
-
-        For storing a polygon (or multiple)
-        for polygon with coords (on a slide <512x512 ie 2x2 tiles):
-        1,1
-        1,2
-        300,300
-        3,3
-
-        to store: (everything in omega)
-            tile lengths: 3, 0, 0, 1 // tile_lengths -- NOT USED
-            #points in tile 2, 1, 1 // num_points_in_tile, sums up to num points in polygon
-            xjump to next tile: 0,1,-1
-            yjump to next tile  0,1,-1
-
-        +1byte remainders by div 256: 1, 1, 1, 2, 44, 44, 3, 3
-        """
-        logger.debug("Starting decode of polygons")
-
-        with self.anno2.open("polygon_container/encoded_polygons.bin.br") as f:
-            logger.debug("Starting decode of encoded_polygons.bin.br")
-            encoded_polygons_bytes: bytes = brotli.decompress(f.read())
-            buf = memoryview(encoded_polygons_bytes)
-        logger.debug("Read encoded polygons from Anno2")
-
-        tile_size = int.from_bytes(buf[:4], "little")
-        if tile_size != 256:
-            raise ValueError(
-                f"Did not read expected tile size from polygons binary format {tile_size=} != 256, is your file corrupted?"
-            )
-        num_rows = int.from_bytes(buf[4:8], "little")
-        num_cols = int.from_bytes(buf[8:12], "little")
-        polygon_lengths_byte_len = int.from_bytes(buf[12:16], "little")
-
-        polygon_lengths_bytes = buf[16 : 16 + polygon_lengths_byte_len]
-        pos = 16 + polygon_lengths_byte_len
-
-        polygon_lengths = array.array("I")
-        polygon_lengths.frombytes(polygon_lengths_bytes)
-        logger.info(
-            f"{tile_size=} {num_rows} {num_cols=} {polygon_lengths_byte_len=} {polygon_lengths=}"
-        )
-
-        if len(polygon_lengths) != self.system_metadata["numItems"]:
-            logger.warning(
-                f"Did not decode the expected number ({self.system_metadata['numItems']}) of polgons, got {len(polygon_lengths)}"
-            )
-        else:
-            logger.debug(f"Got the expected number of polygons {len(polygon_lengths)=}")
-
-        # Now we need to decode the omega encoded x_jumps, y_jumps, num_points_in_tile
-        x_jumps, pos = self._decode_omega_encoded_array(buf, pos, "integers")
-        y_jumps, pos = self._decode_omega_encoded_array(buf, pos, "integers")
-        num_points_in_tile, pos = self._decode_omega_encoded_array(
-            buf, pos, "naturalOnly"
-        )
-        logger.debug(f"{x_jumps=} {y_jumps=} {num_points_in_tile=}")
-        remainders_len = int.from_bytes(buf[pos : pos + 4], "little")
-        pos += 4
-        remainders = buf[pos : pos + remainders_len]
-        logger.debug(f'{remainders_len=} {list(remainders.cast("B"))[:20]=}')
-
-        # Perform final decode step
-        raw_polygons = self._polygons_recombine_into_raw(
-            x_jumps, y_jumps, num_points_in_tile, tile_size, remainders, polygon_lengths
-        )
-        logger.info(f"{raw_polygons[:5]=}")
-        return raw_polygons
-
-    def _decode_omega_encoded_array(self, buf: memoryview, pos: int, type: str):
-        """Decode omega encoded array, can contain suffixing zeros/ones due to byte padding"""
-        omega_decoder = OmegaEncoder()
-        array_byte_count = int.from_bytes(buf[pos : pos + 4], "little")
-        pos += 4
-        array_bytes = buf[pos : pos + array_byte_count]
-        pos += array_byte_count
-        array_bitarray = bitarray()
-        array_bitarray.frombytes(array_bytes)
-        array = omega_decoder.decode(array_bitarray, type)
-        return array, pos
-
-    def _polygons_recombine_into_raw(
-        self,
-        x_jumps: list[int],
-        y_jumps: list[int],
-        num_points_in_tile: list[int],
-        tile_size: int,
-        remainders: memoryview,  # uint8
-        polygon_lengths: array.array,  # array of type 'I' (uint32)
-    ):
-        """Converts a set of tile x_jumps, y_jumps, remainders and some other data into a Polygons object"""
-        tile_x = 0
-        tile_y = 0
-
-        num_points = len(remainders) // 2
-
-        polygon_lengths = polygon_lengths[
-            :
-        ]  # make a copy because we are going to modify it
-        polygons = Polygons()
-        cur_polygon = []
-
-        remainder_i = 0
-        num_jumps = min(len(num_points_in_tile), len(x_jumps), len(y_jumps))
-        for i in range(num_jumps):
-            x_jump = x_jumps[i]
-            y_jump = y_jumps[i]
-
-            tile_x += x_jump
-            tile_y += y_jump
-
-            # _log.debug(f'{len(num_points_in_tile)=}, {len(x_jumps)=} {i=}')
-            num_points_in_this_tile = num_points_in_tile[i]
-            for _ in range(num_points_in_this_tile):
-                if remainder_i // 2 >= num_points:
-                    # Because the jump tables are stored as a bit array with suffixing zeros,
-                    # these are mistaken for encoded 1's, so we stop if we run out of points
-                    break
-
-                x_in_tile = remainders[remainder_i]
-                y_in_tile = remainders[remainder_i + 1]
-
-                raw_x = tile_x * tile_size + x_in_tile
-                raw_y = tile_y * tile_size + y_in_tile
-
-                cur_polygon.extend([raw_x, raw_y])
-                if len(cur_polygon) == polygon_lengths[0]:
-                    polygons.addPolygon(cur_polygon)
-                    polygon_lengths = polygon_lengths[1:]
-                    cur_polygon = []
-
-                remainder_i += 2
-
-        return polygons
-
-    def _decode_mask_png(self, png_buf: bytes):
-        """Decodes a PNG into a tile_size and list of points containing non-zero values"""
-        reader = png.Reader(bytes=png_buf)
-        width, height, rows, info = reader.read()
-        assert width == height
-        points = []
-        if info["bitdepth"] == 1:
-            # Extract the points from the rows
-            row_i = 0
-            for row in rows:
-                x_vals = [i for i, b in enumerate(row) if b != 0]
-                for x in x_vals:
-                    points.append((x, row_i))
-                row_i += 1
-        logger.debug(f"PNG {width=} {height=} {points=} {info=}")
-        return width, points
-
-    def _decode_heatmap_png(self, png_buf: bytes):
-        """Decodes a PNG to get the width & height and a (x, y, value) list. value from 0 to 255"""
-        reader = png.Reader(bytes=png_buf)
-        width, height, rows, info = reader.read()
-        points = []
-        # Extract the points from the rows
-        row_i = 0
-        for row in rows:
-            for x, value in enumerate(row):
-                if value != 0:
-                    points.append((x, row_i, value))
-            row_i += 1
-        logger.debug(f"PNG {width=} {height=} {len(points)=} {info=}")
-        return width, height, points
+def _infer_output_type(path: str) -> str:
+    filename = os.path.basename(path).lower()
+    if filename.endswith(".geo.json"):
+        return "geojson"
+    ext = os.path.splitext(filename)[1].lstrip(".")
+    return ext if ext in {"tsv", "json", "png", "geojson"} else "unknown"

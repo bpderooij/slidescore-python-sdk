@@ -1,4 +1,4 @@
-"""Anno2 codec — encode and decode SlideScore Anno2 ZIP archives.
+"""Anno2 codec -- encode and decode SlideScore Anno2 ZIP archives.
 
 This is the primary value of the slidescore SDK: the anno2 binary format
 (omega encoding, tiled polygon containers, density maps) is complex,
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from .containers import Heatmap, Points, Polygons
 from ._encoder import Encoder
-from ._decoder import Decoder
+from ._decoder import Decoder, items_to_anno1, items_to_geojson, write_items_tsv, write_items_png
 
 if TYPE_CHECKING:
     from .containers import Items
@@ -51,7 +51,7 @@ def encode(
     encoder.populate_lookup_tables()
     if metadata:
         encoder.add_metadata(metadata)
-    encoder.dump_to_file(str(Path(output_path)))
+    encoder.dump_to_file(str(output_path))
 
 
 def decode(anno2_path: str | Path) -> Points | Polygons | Heatmap:
@@ -81,4 +81,8 @@ __all__ = [
     "Points",
     "Polygons",
     "Heatmap",
+    "items_to_anno1",
+    "items_to_geojson",
+    "write_items_tsv",
+    "write_items_png",
 ]
