@@ -5,11 +5,12 @@ from pathlib import Path
 
 import requests
 
+from .annotations import Annotations
 from .api import annotations, scores, sessions, slides, studies, tiles, uploads
 from .errors import SlideScoreAPIError
 from .models import SlideScoreResult, SlideScoreSession, SlideScoreSessionEvent
 from .types import (
-    Anno2ConvertInput,
+    Anno2Items,
     Anno2OptionalId,
     APIParamValue,
     JSONObject,
@@ -314,7 +315,7 @@ class APIClient:
 
     def convert_to_anno2(
         self,
-        items: Anno2ConvertInput,
+        items: Annotations | Anno2Items | list[JSONObject],
         metadata: JSONValue | None,
         output_path: str | Path,
     ) -> None:

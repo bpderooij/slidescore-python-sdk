@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import datetime
+import functools
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
-from .types import JSONObject, SlideScoreAnnotationJson, SlideScorePointCoordJson
+from slidescore.annotations import Annotations
 
 _ROW_TAB = "\t"
 
@@ -51,14 +52,12 @@ class SlideScoreResult:
     ``POST /Api/UploadResults`` expects (non-empty strings and a positive image id).
     ``answer`` may be empty or omitted; TMA fields must be complete if any is set.
 
-    **Parsed ``answer`` (optional):** SlideScore stores shape answers as a single
-    JSON string in ``answer`` -- either AnnoShapes-style dicts (each has a
-    ``type`` key) or a flat list of ``{x,y}`` objects for AnnoPoints. When
-    ``parse_answer_json`` is true, that string is copied into :attr:`annotations`
-    or :attr:`points` so callers can branch without re-parsing. Upload and TSV
-    serialization use only the raw ``answer`` string; these lists are not sent
-    to the API.     They are not used on the SlideForge inference path (which uses dlup
-    ``SlideAnnotations`` instead).
+    **Shape answers:** When ``answer`` holds SlideScore AnnoShapes / AnnoPoints JSON
+    (a JSON list), :attr:`annotations` parses it lazily via
+    :meth:`slidescore.annotations.Annotations.from_slidescore_json`. Use
+    :meth:`set_answer_from_annotations` to set ``answer`` from an
+    :class:`Annotations` instance. Upload and TSV serialization use only the raw
+    ``answer`` string.
     """
 
     id: int
@@ -71,8 +70,6 @@ class SlideScoreResult:
     tma_sample_id: str | None
     question: str | None
     answer: str | None
-    annotations: list[SlideScoreAnnotationJson] | None
-    points: list[SlideScorePointCoordJson] | None
 
     def __init__(
         self,
@@ -87,9 +84,6 @@ class SlideScoreResult:
         tma_sample_id: str | None = None,
         question: str | None = None,
         answer: str | None = None,
-        annotations: list[SlideScoreAnnotationJson] | None = None,
-        points: list[SlideScorePointCoordJson] | None = None,
-        parse_answer_json: bool = True,
     ) -> None:
         self.id = id
         self.image_id = image_id
@@ -101,36 +95,41 @@ class SlideScoreResult:
         self.tma_sample_id = tma_sample_id
         self.question = question
         self.answer = answer
-        self.annotations = annotations
-        self.points = points
-        if parse_answer_json and annotations is None and points is None:
-            self._try_parse_answer_json()
 
-    def _try_parse_answer_json(self) -> None:
+    @functools.cached_property
+    def annotations(self) -> Annotations | None:
+        """Parsed :class:`Annotations` from ``answer``, or ``None`` if not shape JSON."""
         ans = self.answer
-        if ans and len(ans) >= 2 and ans.startswith("[{"):
-            try:
-                loaded = json.loads(ans)
-                if not isinstance(loaded, list) or not loaded:
-                    return
-                first = loaded[0]
-                if not isinstance(first, Mapping):
-                    return
-                annos = cast(list[JSONObject], loaded)
-                if first.get("type") is not None:
-                    self.annotations = annos
-                else:
-                    self.points = annos
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"SlideScoreResult answer looks like JSON (starts with '[{{') but is not valid "
-                    f"JSON (result id={self.id}, image_id={self.image_id})"
-                ) from exc
+        if not ans or len(ans) < 2 or not ans.startswith("[{"):
+            return None
+        try:
+            loaded = json.loads(ans)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"SlideScoreResult answer looks like JSON (starts with '[{{') but is not valid "
+                f"JSON (result id={self.id}, image_id={self.image_id})"
+            ) from exc
+        if not isinstance(loaded, list) or not loaded:
+            return None
+        first = loaded[0]
+        if not isinstance(first, Mapping):
+            return None
+        dicts = [
+            dict(cast(Mapping[str, object], x))
+            for x in loaded
+            if isinstance(x, Mapping)
+        ]
+        if len(dicts) != len(loaded):
+            return None
+        return Annotations.from_slidescore_json(cast(list[dict], dicts))
+
+    def set_answer_from_annotations(self, annotations: Annotations) -> None:
+        """Serialize an :class:`Annotations` to the ``answer`` JSON string (SlideScore wire)."""
+        self.answer = json.dumps(annotations.to_slidescore_json())
+        self.__dict__.pop("annotations", None)
 
     @classmethod
-    def from_api_response(
-        cls, data: Mapping[str, object] | None
-    ) -> SlideScoreResult:
+    def from_api_response(cls, data: Mapping[str, object] | None) -> SlideScoreResult:
         """Build from a JSON object returned by the Scores API."""
         if data is None:
             return cls()
@@ -217,9 +216,7 @@ class SlideScoreResult:
                     _to_upload_cell(self.tma_sample_id),
                 ]
             )
-        segments.extend(
-            [_to_upload_cell(self.question), _to_upload_cell(self.answer)]
-        )
+        segments.extend([_to_upload_cell(self.question), _to_upload_cell(self.answer)])
         return "\t".join(segments)
 
     def toRow(self) -> str:
@@ -270,9 +267,7 @@ class SlideScoreSession:
         self.created_on = created_on
 
     @classmethod
-    def from_api_response(
-        cls, data: Mapping[str, object] | None
-    ) -> SlideScoreSession:
+    def from_api_response(cls, data: Mapping[str, object] | None) -> SlideScoreSession:
         """Build from a JSON object returned by the Sessions API."""
         if data is None:
             return cls()

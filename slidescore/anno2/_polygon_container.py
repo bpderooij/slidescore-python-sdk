@@ -1,7 +1,7 @@
 import array
 
-from .containers import Polygons, TileRange
 from ._polygon_codec import polygons_to_bytes
+from ._stores import TileRange, _PolygonStore
 
 
 class PolygonContainer:
@@ -11,7 +11,7 @@ class PolygonContainer:
     intersects.  "Big" polygons are additionally tracked separately.
     """
 
-    def __init__(self, tile_size: int, polygons: Polygons):
+    def __init__(self, tile_size: int, polygons: _PolygonStore):
         self.all_tiles: dict = {}
         self.big_tiles: dict = {}
         self.polygons = polygons

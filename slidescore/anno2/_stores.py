@@ -1,25 +1,60 @@
+"""Private storage primitives backing the anno2 codec.
+
+These classes are an encoder/decoder implementation detail. They are
+**not** the public domain model — that's :mod:`slidescore.geometries`,
+exposed via the :class:`~slidescore.annotations.Annotations` collection.
+
+The names start with an underscore for that reason. Nothing outside the
+``slidescore.anno2`` package and the ``Annotations`` collection should
+import from here.
+"""
+
 from __future__ import annotations
 
 import array
 import logging
 from collections.abc import Sequence
-from typing import NamedTuple, TypedDict
+from typing import Any, NamedTuple
 
-from slidescore.anno2._simplify import simplify_polygons
+from slidescore.anno2._simplify import simplify
+from slidescore.anno2._types import FlatPolygonCoords
 
 logger = logging.getLogger(__name__)
 
 
-class Points(Sequence):
+class TileRange(NamedTuple):
+    """Inclusive tile indices on the slide grid for an item bounding box."""
+
+    x_start: int
+    y_start: int
+    x_end: int
+    y_end: int
+
+
+class _PolygonRow(NamedTuple):
+    """Raw polygon data as stored on disk for a single ``polygon_i``.
+
+    Returned by :meth:`_PolygonStore.__getitem__`. Contains *no* label
+    and *no* color — those live in side channels (``self.labels``,
+    ``self.metadata``) and are joined back to the row by the
+    ``Annotations`` layer.
+    """
+
+    exterior: list[tuple[int, int]]
+    interiors: list[list[tuple[int, int]]]
+    metadata: dict[str, Any]
+
+
+class _PointStore(Sequence):
     """Space-efficient storage of 2-D points (mask or annotation).
 
-    Can be indexed to get a ``(x, y)`` tuple for the *n*-th point.
+    Indexable; the *n*-th element is a ``(x, y)`` tuple.
     """
 
     def __init__(self, init_points: list | None = None):
         self.name = "points"
         self.flattened_points = array.array("I")
-        self.metadata: dict[str, dict] = {}
+        self.metadata: dict[int, dict] = {}
         super().__init__()
 
         if init_points:
@@ -38,36 +73,50 @@ class Points(Sequence):
         return len(self.flattened_points) // 2
 
 
-class Polygons(Sequence):
+class _PolygonStore(Sequence):
     """Space-efficient storage of positive/negative polygon vertices.
 
-    Internally uses ``EfficientArray`` for the flat coordinate data.
+    Internally uses :class:`EfficientArray` for the flat coordinate data.
+    Iteration / ``__getitem__`` yields :class:`_PolygonRow` instances —
+    promotion to a domain-model :class:`~slidescore.geometries.Polygon`
+    (or its sibling shapes) is the caller's responsibility.
     """
 
     def __init__(self):
         self.name = "polygons"
         self.polygons = EfficientArray()
         self.simplified_polygons = []
-        self.negative_polygons_i = {}
-        self.labels = []
+        self.negative_polygons_i: dict[int, list[int]] = {}
+        self.labels: list[dict[str, Any]] = []
         self.metadata: dict[int, dict] = {}
+        #: Maps positive ``polygon_i`` to overlay payload (``kind``, geometry fields)
+        #: for ellipse/rectangle strokes. Written to ``shape_overlay.json`` in the ZIP.
+        self.shape_overlay: dict[int, dict[str, Any]] = {}
         super().__init__()
 
-    def __getitem__(self, i: int | slice):
+    def __getitem__(self, i: int | slice) -> _PolygonRow | list[_PolygonRow]:
         if isinstance(i, slice):
             start, stop, step = i.indices(len(self))
             return [self[index] for index in range(start, stop, step)]
 
         points_flat = self.polygons[i]
-        positive_vertices = [
-            (points_flat[j], points_flat[j + 1]) for j in range(0, len(points_flat), 2)
+        vertices = [
+            (points_flat[j], points_flat[j + 1])
+            for j in range(0, len(points_flat), 2)
         ]
-        return {
-            "positiveVertices": positive_vertices,
-            "negativeVerticesArr": (
-                self.negative_polygons_i[i] if i in self.negative_polygons_i else None
-            ),
-        }
+        neg_indices = self.negative_polygons_i.get(i)
+        interiors: list[list[tuple[int, int]]] = []
+        if neg_indices:
+            for ni in neg_indices:
+                nc = self.polygons[ni]
+                interiors.append(
+                    [(nc[j], nc[j + 1]) for j in range(0, len(nc), 2)],
+                )
+        return _PolygonRow(
+            exterior=vertices,
+            interiors=interiors,
+            metadata=dict(self.metadata.get(i, {})),
+        )
 
     def add_polygon(self, positive_vertices) -> int:
         """Add a polygon and return its index."""
@@ -80,16 +129,28 @@ class Polygons(Sequence):
             self.negative_polygons_i[pos_polygon_i] = []
         self.negative_polygons_i[pos_polygon_i].append(neg_polygon_i)
 
+    def _simplify_polygons(self, tolerance: float = 1.0) -> None:
+        result = EfficientArray()
+        for polygon in self.polygons:
+            result.add_values(simplify(polygon, tolerance))
+        assert len(self.polygons) == len(result)
+        if tolerance > 1:
+            self.simplified_polygons = result
+        else:
+            self.polygons = result
+
     def simplify(self):
-        """Simplify stored polygons to 1 px accuracy, and create further simplified copies for lookup tables."""
-        self.polygons = simplify_polygons(self.polygons, 1)
-        self.simplified_polygons = simplify_polygons(self.polygons, 16)
+        """Simplify stored polygons in place; build a coarser lookup copy."""
+        # Light pass: canonical vertex data stays on ``self.polygons``.
+        self._simplify_polygons(1)
+        # Heavy pass: coarser rings for the simplified-polygons ZIP stream.
+        self._simplify_polygons(16)
 
     def __len__(self):
         return len(self.polygons)
 
 
-class Heatmap:
+class _HeatmapStore:
     """Stores an x/y/value heatmap as a 2-D matrix of unsigned bytes."""
 
     matrix: list[array.array]
@@ -110,7 +171,9 @@ class Heatmap:
         try:
             self._copy_matrix(data, self.matrix)
         except (OverflowError, TypeError) as exc:
-            raise ValueError("Heatmap values must be integers in range 0-255") from exc
+            raise ValueError(
+                "Heatmap values must be integers in range 0-255"
+            ) from exc
 
         self.x_offset = x_offset
         self.y_offset = y_offset
@@ -147,21 +210,25 @@ class Heatmap:
         source: Sequence[Sequence[int]],
         target: list[array.array],
     ) -> None:
-        """Copy *source* into *target* row-wise (``__init__`` or ``set_point`` grow)."""
+        """Copy *source* into *target* row-wise (used by ``__init__`` / ``set_point``)."""
         for i, row in enumerate(source):
-            ub = row if isinstance(row, array.array) and row.typecode == "B" else array.array("B", row)
+            ub = (
+                row
+                if isinstance(row, array.array) and row.typecode == "B"
+                else array.array("B", row)
+            )
             target[i][: len(ub)] = ub
 
     @classmethod
     def from_numpy(
-        cls, arr: "numpy.ndarray", x_offset: int, y_offset: int, size_per_pixel: int
-    ) -> Heatmap:
-        """Construct a Heatmap from a 2-D numpy array.
+        cls, arr: Any, x_offset: int, y_offset: int, size_per_pixel: int
+    ) -> _HeatmapStore:
+        """Construct a :class:`_HeatmapStore` from a 2-D numpy array.
 
         Parameters
         ----------
         arr : numpy.ndarray
-            2-D array with shape ``(rows, cols)``. Values must be in 0–255.
+            2-D array with shape ``(rows, cols)``. Values must be in 0-255.
             ``uint8`` arrays are accepted as-is; other dtypes are validated
             for range then cast.
         x_offset : int
@@ -171,7 +238,9 @@ class Heatmap:
         try:
             import numpy as np
         except ImportError as exc:
-            raise ImportError("numpy is required for Heatmap.from_numpy") from exc
+            raise ImportError(
+                "numpy is required for _HeatmapStore.from_numpy"
+            ) from exc
 
         if arr.ndim != 2:
             raise ValueError(f"Expected a 2-D array, got shape {arr.shape}")
@@ -180,7 +249,8 @@ class Heatmap:
             arr_min, arr_max = int(arr.min()), int(arr.max())
             if arr_min < 0 or arr_max > 255:
                 raise ValueError(
-                    f"Array values must be in range 0-255, got min={arr_min}, max={arr_max}"
+                    f"Array values must be in range 0-255, got "
+                    f"min={arr_min}, max={arr_max}"
                 )
             arr = arr.astype(np.uint8)
 
@@ -238,37 +308,12 @@ class EfficientArray(Sequence[array.array]):
         return len(self.offset_array) - 1
 
 
-# Types
-class TileRange(NamedTuple):
-    """Inclusive tile indices on the slide grid for an item bounding box.
-
-    Used when binning points (masks, density lookups) and polygons
-    (polygon container); not specific to either.
-    """
-
-    x_start: int
-    y_start: int
-    x_end: int
-    y_end: int
-
-
-Items = Points | Polygons | Heatmap
-
-# One element when iterating ``Points`` (an ``(x, y)`` pair in slide coordinates).
-Point = tuple[int, int]
-
-
-class Polygon(TypedDict):
-    """One polygon row in SlideScore wire shape (same as :meth:`Polygons.__getitem__`).
-
-    Not to be confused with :class:`Polygons`, which holds many polygons.
-    """
-
-    positiveVertices: list[tuple[float, float]]
-    negativeVerticesArr: list[int] | None
-
-
-# Flat ``[x1, y1, x2, y2, ...]`` for omega / tile polygon encoding (unsigned ints).
-FlatPolygonCoords = list[int]
-
-Item = Point | Polygon
+__all__ = [
+    "EfficientArray",
+    "FlatPolygonCoords",
+    "TileRange",
+    "_HeatmapStore",
+    "_PointStore",
+    "_PolygonRow",
+    "_PolygonStore",
+]

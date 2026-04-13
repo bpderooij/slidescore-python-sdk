@@ -11,10 +11,19 @@ from typing import cast
 import brotli
 import msgpack
 
-from .containers import Heatmap, Item, Items, Points, Polygon, Polygons, TileRange
-from ._image_utils import encode_png, _points_to_png, lookup_table_to_png
+from slidescore.anno2._types import PointCoord
+from slidescore.types import Anno2Items, EncoderItem
+
+from ._image_utils import _points_to_png, encode_png, lookup_table_to_png
 from ._polygon_container import PolygonContainer
 from ._serializers import msgpack_encoder
+from ._stores import (
+    TileRange,
+    _HeatmapStore,
+    _PointStore,
+    _PolygonRow,
+    _PolygonStore,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -58,7 +67,9 @@ def _tile_range_for_bounds(
 
 
 def _points_anno1_json(point_coordinates: Iterable[tuple[int, int]]) -> str:
-    return json.dumps([{"x": cx, "y": cy} for cx, cy in point_coordinates])
+    return json.dumps(
+        [{"x": x_coord, "y": y_coord} for x_coord, y_coord in point_coordinates],
+    )
 
 
 def _add_to_tar(tar: tarfile.TarFile, buffer: bytes, name: str) -> None:
@@ -99,6 +110,17 @@ def _add_polygon_container(
         json.dumps(container.polygons.negative_polygons_i, indent=2).encode(),
     )
 
+    overlay = getattr(container.polygons, "shape_overlay", None) or {}
+    if overlay:
+        entries = [
+            {"polygon_i": polygon_i, **spec}
+            for polygon_i, spec in sorted(overlay.items(), key=lambda item: item[0])
+        ]
+        zf.writestr(
+            f"{dir_name}/shape_overlay.json",
+            json.dumps(entries, indent=2).encode(),
+        )
+
 
 class Encoder:
     """Encode Points, Polygons, or Heatmap into an Anno2 ZIP archive.
@@ -123,7 +145,7 @@ class Encoder:
 
     def __init__(
         self,
-        items: Items,
+        items: Anno2Items,
         big_polygon_size_cutoff: int = DEFAULT_BIG_POLYGON_SIZE_CUTOFF,
     ) -> None:
         self.items = items
@@ -139,13 +161,13 @@ class Encoder:
         }
         self.user_metadata: dict = {}
 
-        if isinstance(items, Points):
+        if isinstance(items, _PointStore):
             _logger.debug(
                 "Loaded %s points in encoder, type: %s",
                 self._data_items["numItems"],
                 type_string,
             )
-        elif isinstance(items, Polygons):
+        elif isinstance(items, _PolygonStore):
             self.items = copy.deepcopy(items)
             num_points = len(self.items.polygons.values_array) // 2
             _logger.debug(
@@ -156,7 +178,7 @@ class Encoder:
             self.items.simplify()
             num_points = len(self.items.polygons.values_array) // 2
             _logger.debug("Simplified to num points %s", num_points)
-        elif isinstance(items, Heatmap):
+        elif isinstance(items, _HeatmapStore):
             _logger.debug(
                 "Loaded %s byte %s in encoder, with shape %s %s",
                 self._data_items["numItems"],
@@ -165,35 +187,37 @@ class Encoder:
                 len(items.matrix[0]),
             )
 
-    def _item_bounding_box(self, item: Item) -> tuple[float, float, float, float]:
+    def _item_bounding_box(self, item: EncoderItem) -> tuple[float, float, float, float]:
         """Return (min_x, min_y, max_x, max_y) for a point or polygon item."""
-        if isinstance(self.items, Points):
-            x, y = cast(tuple[int, int], item)
+        if isinstance(self.items, _PointStore):
+            x, y = cast(PointCoord, item)
             return _bounding_box([(float(x), float(y))])
-        polygon_item = cast(Polygon, item)
-        return _bounding_box(polygon_item["positiveVertices"])
+        row = cast(_PolygonRow, item)
+        return _bounding_box(
+            [(float(x), float(y)) for x, y in row.exterior]
+        )
 
-    def _polygon_bbox_area(self, item: Item) -> float:
+    def _polygon_bbox_area(self, item: EncoderItem) -> float:
         return _bounding_box_area(*self._item_bounding_box(item))
 
     def generate_tile_data(self, tile_size: int = 256) -> None:
         """Bin items into tiles and store the result in ``_data_items``."""
-        if isinstance(self.items, Points):
+        if isinstance(self.items, _PointStore):
             self._data_items["masks"] = self._bin_points_into_tiles(tile_size)
-        elif isinstance(self.items, Polygons):
+        elif isinstance(self.items, _PolygonStore):
             self._data_items["polygonContainer"] = self._bin_polygons_into_tiles(tile_size)
-        elif isinstance(self.items, Heatmap):
+        elif isinstance(self.items, _HeatmapStore):
             height, width = len(self.items.matrix), len(self.items.matrix[0])
             self._data_items["heatmapPng"] = encode_png(
                 self.items.matrix, width, height, bitdepth=8
             )
 
     def _bin_points_into_tiles(self, tile_size: int):
-        items = cast(Points, self.items)
+        items = cast(_PointStore, self.items)
 
         if len(items) < self.few_points_json_cutoff and items.name == "points":
             _logger.info(
-                "Anno2 points layer: count %s < few_points_json_cutoff (%s) — "
+                "Anno2 points layer: count %s < few_points_json_cutoff (%s) - "
                 "using anno1 JSON (anno1_points.json.br), not tiled mask PNGs; "
                 "SlideScore still shows these as normal point annotations.",
                 len(items),
@@ -220,7 +244,7 @@ class Encoder:
         if num_points_per_tile < self.low_density_points_per_tile and items.name == "points":
             _logger.info(
                 "Anno2 points layer: mean %.1f points/tile < low_density_points_per_tile "
-                "(%s) — using anno1 JSON (anno1_points.json.br), not tiled mask PNGs; "
+                "(%s) - using anno1 JSON (anno1_points.json.br), not tiled mask PNGs; "
                 "SlideScore still shows these as normal point annotations.",
                 num_points_per_tile,
                 self.low_density_points_per_tile,
@@ -258,7 +282,7 @@ class Encoder:
 
     def populate_lookup_tables(self) -> None:
         """Build density-map PNGs and store them in ``_data_lookups``."""
-        if isinstance(self.items, Heatmap):
+        if isinstance(self.items, _HeatmapStore):
             _logger.debug("Skipping lookup table generation for heatmap")
             return
 
@@ -298,14 +322,14 @@ class Encoder:
     def _bin_lookup(self, tile_size: int) -> dict:
         items = self.items
         num_points_to_add = (
-            1 if isinstance(items, Points) else self.polygon_lookup_weight
+            1 if isinstance(items, _PointStore) else self.polygon_lookup_weight
         )
 
         tile_bins: dict = {}
         data = {"tile_size": tile_size, "lookup": tile_bins, "maxValue": 0}
 
         for item in items:
-            if isinstance(items, Polygons):
+            if isinstance(items, _PolygonStore):
                 if self._polygon_bbox_area(item) > self.big_polygon_size_cutoff:
                     continue
 
@@ -403,7 +427,7 @@ class Encoder:
                     zf, self._data_items["polygonContainer"], "polygon_container"
                 )
 
-            if isinstance(self.items, Polygons) and len(self.items.labels) > 0:
+            if isinstance(self.items, _PolygonStore) and len(self.items.labels) > 0:
                 zf.writestr(
                     "labels.json",
                     json.dumps(self.items.labels, indent=2).encode(),

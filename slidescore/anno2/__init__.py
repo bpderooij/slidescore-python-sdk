@@ -6,25 +6,23 @@ undocumented, and only this SDK implements it.
 
 Usage::
 
-    from slidescore.anno2 import encode, decode, Points, Polygons, Heatmap
+    from slidescore.anno2 import encode, decode
 """
 
 from __future__ import annotations
 
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from .containers import Heatmap, Points, Polygons
+from slidescore.types import Anno2Items
+
+from ._decoder import Decoder
 from ._encoder import DEFAULT_BIG_POLYGON_SIZE_CUTOFF, Encoder
-from ._decoder import Decoder, items_to_anno1, items_to_geojson, write_items_tsv, write_items_png
-
-if TYPE_CHECKING:
-    from .containers import Items
+from ._stores import _HeatmapStore, _PointStore, _PolygonStore
 
 
 def encode(
-    items: Items,
+    items: Anno2Items,
     output_path: str | Path,
     *,
     metadata: dict | None = None,
@@ -55,8 +53,8 @@ def encode(
     encoder.dump_to_file(str(output_path))
 
 
-def decode(anno2_path: str | Path) -> Points | Polygons | Heatmap:
-    """Decode an Anno2 ZIP file into annotation items.
+def decode(anno2_path: str | Path) -> _PointStore | _PolygonStore | _HeatmapStore:
+    """Decode an Anno2 ZIP file into a codec storage primitive.
 
     Parameters
     ----------
@@ -65,12 +63,14 @@ def decode(anno2_path: str | Path) -> Points | Polygons | Heatmap:
 
     Returns
     -------
-    Points | Polygons | Heatmap
-        The decoded annotation items.
+    _PointStore | _PolygonStore | _HeatmapStore
+        The decoded storage primitive. Use the ``Annotations`` collection
+        for a domain-model view; this return type is an implementation detail of the codec.
     """
     with zipfile.ZipFile(str(anno2_path)) as zf:
         decoder = Decoder(zf)
         decoder.decode()
+        assert decoder.items is not None
         return decoder.items
 
 
@@ -80,11 +80,4 @@ __all__ = [
     "DEFAULT_BIG_POLYGON_SIZE_CUTOFF",
     "Encoder",
     "Decoder",
-    "Points",
-    "Polygons",
-    "Heatmap",
-    "items_to_anno1",
-    "items_to_geojson",
-    "write_items_tsv",
-    "write_items_png",
 ]

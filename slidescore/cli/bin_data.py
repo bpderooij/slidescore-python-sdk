@@ -1,18 +1,87 @@
-
 import argparse
 import gzip
 import json
 import logging
 
-from .anno2._encoder import Encoder
-from .parsers.geojson import read_geo_json
-from .parsers.slidescore_json import read_slidescore_json
-from .parsers.tsv import read_tsv
+from slidescore.anno2._encoder import Encoder
+from slidescore.importers.geojson import from_geojson
+from slidescore.importers.slidescore import (
+    from_heatmap_tsv,
+    from_points_tsv,
+    from_polygons_tsv,
+    read_slidescore_json,
+)
+from slidescore.shapes import (
+    EllipseRecord,
+    PointRecord,
+    PolygonRecord,
+    RectangleRecord,
+    to_containers,
+)
 
 DESC = """
 This program converts a items TSV file (or slidescore_anno1.json) of either points in a mask, polygons or a heatmap, into a binned format for fast lookup.
 Author: Bart.
 """
+
+_logger = logging.getLogger(__name__)
+
+
+def _load_geojson_items(path: str):
+    with open(path) as fh:
+        data = json.load(fh)
+    records = from_geojson(data)
+    points = [
+        record for record in records if isinstance(record, PointRecord)
+    ]
+    polys = [
+        record
+        for record in records
+        if isinstance(
+            record,
+            (PolygonRecord, EllipseRecord, RectangleRecord),
+        )
+    ]
+    if points and polys:
+        _logger.warning(
+            "Detected BOTH points and polygons in GeoJSON, only continuing with polygons"
+        )
+        _logger.warning(
+            "Please remove the points from the GeoJSON to prevent ambiguity"
+        )
+        records = polys
+    return to_containers(records)
+
+
+def _load_tsv_items(path: str, points_type: str, experimental: bool):
+    with open(path) as fh:
+        text = fh.read()
+    first_line = text.split("\n", 1)[0]
+    line_parts = first_line.split()
+
+    is_heatmap = len(line_parts) >= 1 and line_parts[0].lower() == "heatmap"
+    is_binary = len(line_parts) >= 1 and line_parts[0].lower() == "binary-heatmap"
+    if is_binary and not experimental:
+        raise ValueError(
+            "Wanted to encode a binary heatmap but --experimental is not present"
+        )
+
+    if is_heatmap or is_binary:
+        return to_containers(from_heatmap_tsv(text))
+
+    are_points = len(line_parts) == 2
+    if are_points:
+        items = to_containers(from_points_tsv(text))
+        if points_type == "mask":
+            items.name = "mask"
+        return items
+    return to_containers(from_polygons_tsv(text))
+
+
+def load_tsv_items(path: str, points_type: str, *, experimental: bool = False):
+    """Load points, polygons, or heatmap items from a TSV path (CLI-compatible)."""
+    return _load_tsv_items(path, points_type, experimental)
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=DESC)
@@ -63,11 +132,10 @@ def main(argv=None):
 
     logger.info("Reading data into memory")
 
-    # Parse the input items
     if raw_items_path.endswith(".tsv"):
-        items = read_tsv(raw_items_path, args.points_type, args.experimental)
+        items = _load_tsv_items(raw_items_path, args.points_type, args.experimental)
     elif raw_items_path.endswith(".geojson"):
-        items = read_geo_json(raw_items_path)
+        items = _load_geojson_items(raw_items_path)
     elif raw_items_path.endswith(".json"):
         with open(raw_items_path) as fh:
             data = json.load(fh)
@@ -94,6 +162,7 @@ def main(argv=None):
 
     encoder.dump_to_file(binned_items_path)
     logger.info("Dumped to file")
+
 
 if __name__ == "__main__":
     main()

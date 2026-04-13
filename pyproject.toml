@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "slidescore-sdk"
-version = "1.5.3"
+version = "2.0.0"
 description = "SDK for using the API of Slide Score"
 readme = "README.md"
 license = "MIT"
@@ -19,6 +19,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+    "numpy>=1.20",
     "requests",
     "tuspy",
     "bitarray>=2.7,<3",
@@ -29,7 +30,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-numpy = ["numpy>=1.20"]
 cli = []
 
 [dependency-groups]

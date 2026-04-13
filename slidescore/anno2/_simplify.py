@@ -2,7 +2,7 @@ import array
 
 
 def _sq_segment_distance(p, p1, p2):
-    """Square distance between point *p* and segment *p1*–*p2*."""
+    """Square distance between point *p* and segment *p1*-*p2*."""
     x = p1[0]
     y = p1[1]
 
@@ -79,14 +79,3 @@ def _douglas_peucker(points: array.array, tolerance: float) -> array.array:
 
 def simplify(points: array.array, tolerance: float = 1.0) -> array.array:
     return _douglas_peucker(points, tolerance * tolerance)
-
-
-def simplify_polygons(polygons_arr, tolerance: float = 1.0):
-    # Local import: ``containers`` imports this module at load time.
-    from .containers import EfficientArray
-
-    result = EfficientArray()
-    for polygon in polygons_arr:
-        result.add_values(simplify(polygon, tolerance))
-    assert len(polygons_arr) == len(result)
-    return result

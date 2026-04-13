@@ -1,6 +1,6 @@
 import array
 
-from .containers import EfficientArray
+from ._stores import EfficientArray
 from ._polygon_container import PolygonContainer
 
 _SUPPORTED_TYPECODES: dict[str, str] = {"B": "uint8", "H": "uint16", "I": "uint32"}

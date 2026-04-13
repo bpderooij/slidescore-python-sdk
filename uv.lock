@@ -1249,22 +1249,18 @@ wheels = [
 
 [[package]]
 name = "slidescore-sdk"
-version = "1.5.3"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "bitarray" },
     { name = "brotli" },
     { name = "msgpack" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "packaging" },
     { name = "pypng" },
     { name = "requests" },
     { name = "tuspy" },
-]
-
-[package.optional-dependencies]
-numpy = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.dev-dependencies]
@@ -1279,13 +1275,13 @@ requires-dist = [
     { name = "bitarray", specifier = ">=2.7,<3" },
     { name = "brotli", specifier = ">=1.0.0" },
     { name = "msgpack", specifier = ">=1.0.0" },
-    { name = "numpy", marker = "extra == 'numpy'", specifier = ">=1.20" },
+    { name = "numpy", specifier = ">=1.20" },
     { name = "packaging", specifier = ">=20.0" },
     { name = "pypng", specifier = "==0.20220715.0" },
     { name = "requests" },
     { name = "tuspy" },
 ]
-provides-extras = ["numpy", "cli"]
+provides-extras = ["cli"]
 
 [package.metadata.requires-dev]
 dev = [

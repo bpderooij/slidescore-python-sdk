@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from ..anno2 import encode as anno2_encode
-from ..anno2.containers import Heatmap, Points, Polygons
-from ..parsers.slidescore_json import read_slidescore_json
-from ..types import Anno2ConvertInput, Anno2OptionalId, JSONObject, JSONValue
+from ..anno2._stores import _HeatmapStore, _PointStore, _PolygonStore
+from ..annotations import Annotations
+from ..importers.slidescore import read_slidescore_json
+from ..types import Anno2Items, Anno2OptionalId, JSONObject, JSONValue
 
 if TYPE_CHECKING:
     from ..client import APIClient
@@ -125,21 +126,29 @@ def convert_annotation_to_anno2(
 
 def convert_to_anno2(
     client: APIClient,
-    items: Anno2ConvertInput,
+    items: Annotations | Anno2Items | list[JSONObject],
     metadata: JSONValue | None,
     output_path: str | Path,
 ) -> None:
-    """Locally encode a SlideScore annotation object to Anno2 ZIP format.
+    """Locally encode SlideScore annotation data to Anno2 ZIP format.
 
-    Accepts pre-loaded ``Points``, ``Polygons``, or ``Heatmap`` objects, or a
-    raw list of SlideScore JSON dicts (brush/polygon/heatmap entries).
+    Accepts:
+
+    - an :class:`Annotations` instance (single-layer only),
+    - a pre-loaded ``_PointStore`` / ``_PolygonStore`` / ``_HeatmapStore``, or
+    - a raw list of SlideScore JSON dicts (brush/polygon/heatmap entries).
 
     .. note::
         This is a thin wrapper around :func:`slidescore.anno2.encode`.
         The *client* parameter is unused -- encoding is purely local.
     """
-    items_encoder: Points | Polygons | Heatmap
-    if isinstance(items, (Points, Polygons, Heatmap)):
+    if isinstance(items, Annotations):
+        meta_dict = cast(dict, metadata) if isinstance(metadata, dict) else None
+        items.to_anno2(output_path, metadata=meta_dict)
+        return
+
+    items_encoder: _PointStore | _PolygonStore | _HeatmapStore
+    if isinstance(items, (_PointStore, _PolygonStore, _HeatmapStore)):
         items_encoder = items
     else:
         items_encoder = read_slidescore_json(items)

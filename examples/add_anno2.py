@@ -79,7 +79,9 @@ if __name__ == "__main__":
         print('Created temporary directory for Anno2 storage', tmp_dirname)
         
         # Read the TSV data into memory
-        anno_data = slidescore.parsers.tsv.read_tsv(tsv_file, "circles") #or mask, polygon, or brush
+        anno_data = slidescore.bin_data.load_tsv_items(
+            tsv_file, "circles", experimental=False
+        )
 
         # Convert to anno2
         local_anno2_path = os.path.join(tmp_dirname, 'anno.zip')

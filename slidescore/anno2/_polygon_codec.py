@@ -9,7 +9,9 @@ import array
 import math
 from io import BufferedWriter, BytesIO
 
-from .containers import EfficientArray, FlatPolygonCoords
+from slidescore.anno2._types import FlatPolygonCoords
+
+from ._stores import EfficientArray
 from ._omega_codec import OmegaEncoder
 
 
